@@ -1,0 +1,363 @@
+/* ===================================================================
+   KioskoPro — Sistema de Diseño Global
+   Paleta: Violeta profundo + Ámbar dorado | Dark-first
+   =================================================================== */
+
+/* Google Fonts — Inter */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Variables CSS Globales ─────────────────────────────────────── */
+:root {
+  --brand-primary:   #7c3aed;
+  --brand-light:     #a78bfa;
+  --brand-dark:      #5b21b6;
+  --brand-accent:    #f59e0b;
+  --brand-accent-dk: #d97706;
+
+  --surface-canvas:  #f4f5f9;
+  --surface-card:    #ffffff;
+  --surface-border:  #e2e8f0;
+
+  --text-primary:    #0f172a;
+  --text-secondary:  #475569;
+  --text-muted:      #94a3b8;
+
+  /* Transición global */
+  --transition-fast:  150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base:  200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow:  300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark {
+  --surface-canvas:  #111111;
+  --surface-card:    #1c1c1c;
+  --surface-border:  #2e2e2e;
+
+  --text-primary:    #ffffff;
+  --text-secondary:  #c0c0c0;
+  --text-muted:      #737373;
+}
+
+/* ─── Reset Base ─────────────────────────────────────────────────── */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  background-color: var(--surface-canvas);
+  color: var(--text-primary);
+  transition: background-color var(--transition-slow), color var(--transition-slow);
+}
+
+/* ─── Texto en dark mode: forzar blanco en elementos base ─────── */
+.dark body,
+.dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6,
+.dark p, .dark span, .dark label, .dark li, .dark td, .dark th {
+  color: var(--text-primary);
+}
+
+/* Clases de Tailwind que en dark mode necesitan texto blanco */
+.dark .text-slate-900 { color: #ffffff !important; }
+.dark .text-slate-800 { color: #f0f0f0 !important; }
+.dark .text-slate-700 { color: #e0e0e0 !important; }
+.dark .text-slate-600 { color: #c0c0c0 !important; }
+.dark .text-slate-500 { color: #909090 !important; }
+
+/* ─── Scrollbars ─────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255,255,255,0.12);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(124,58,237,0.50);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: #333333;
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: #7c3aed;
+}
+
+/* ─── Selección de texto ─────────────────────────────────────────── */
+::selection {
+  background-color: rgba(124, 58, 237, 0.25);
+  color: inherit;
+}
+
+/* ─── Focus rings globales ───────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+/* ─── Inputs & Selects — estilos base ───────────────────────────── */
+@layer components {
+  .input-base {
+    @apply w-full rounded-xl border bg-white dark:bg-surface-cardDark 
+           px-3.5 py-2.5 text-sm font-medium text-slate-900 dark:text-slate-100
+           border-slate-200 dark:border-surface-borderDark
+           placeholder:text-slate-400 dark:placeholder:text-slate-500
+           focus:border-brand focus:ring-2 focus:ring-brand/20
+           outline-none transition-all duration-150;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl
+           bg-brand hover:bg-brand-dark active:scale-[0.98]
+           px-4 py-2.5 text-sm font-bold text-white
+           shadow-brand hover:shadow-brand-lg
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl
+           bg-accent hover:bg-accent-600 active:scale-[0.98]
+           px-4 py-2.5 text-sm font-bold text-white
+           shadow-accent hover:shadow-lg
+           transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl
+           bg-transparent hover:bg-slate-100 dark:hover:bg-white/5
+           px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300
+           transition-all duration-150;
+  }
+
+  .card {
+    @apply rounded-2xl border bg-white dark:bg-surface-cardDark
+           border-slate-200 dark:border-surface-borderDark
+           shadow-sm dark:shadow-card-dark;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
+           text-[11px] font-bold uppercase tracking-wide;
+  }
+
+  .section-title {
+    @apply text-base font-bold tracking-tight text-slate-900 dark:text-slate-100;
+  }
+
+  .label-xs {
+    @apply block text-[11px] font-bold uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400 mb-1.5;
+  }
+}
+
+/* ─── Animaciones de entrada ─────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in  { animation: fadeIn  0.2s ease-out both; }
+.animate-slide-up { animation: slideUp 0.25s ease-out both; }
+.animate-slide-in-left { animation: slideInLeft 0.2s ease-out both; }
+
+/* ─── Tablas — estilos consistentes ─────────────────────────────── */
+.table-kiosko thead tr th {
+  @apply px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider
+         text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03]
+         border-b border-slate-200 dark:border-white/10;
+}
+
+.table-kiosko tbody tr td {
+  @apply px-4 py-3 text-sm text-slate-700 dark:text-slate-300
+         border-b border-slate-100 dark:border-white/5;
+}
+
+.table-kiosko tbody tr:last-child td {
+  @apply border-b-0;
+}
+
+.table-kiosko tbody tr:hover td {
+  @apply bg-brand/[0.03] dark:bg-brand/[0.06];
+}
+
+/* ─── SweetAlert2 — integrar con la paleta ───────────────────────── */
+.swal2-popup {
+  border-radius: 1.25rem !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+.dark .swal2-popup {
+  background: #161b27 !important;
+  color: #f1f5f9 !important;
+  border: 1px solid #252d3d !important;
+}
+
+.swal2-confirm {
+  background-color: #7c3aed !important;
+  box-shadow: 0 4px 20px rgba(124,58,237,0.35) !important;
+  border-radius: 0.75rem !important;
+}
+
+/* ─── Glassmorphism utility ──────────────────────────────────────── */
+.glass {
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+.glass-dark {
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  background: rgba(13,15,20,0.70);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* ─── Notification Bell Animation ───────────────────────────────── */
+@keyframes bellRing {
+  0%   { transform: rotate(0deg); }
+  10%  { transform: rotate(-18deg); }
+  20%  { transform: rotate(18deg); }
+  30%  { transform: rotate(-14deg); }
+  40%  { transform: rotate(14deg); }
+  50%  { transform: rotate(-8deg); }
+  60%  { transform: rotate(8deg); }
+  70%  { transform: rotate(-4deg); }
+  80%  { transform: rotate(4deg); }
+  90%  { transform: rotate(0deg); }
+  100% { transform: rotate(0deg); }
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── Notification highlight pulse ──────────────────────────────── */
+@keyframes highlightPulse {
+  0%   { background: rgba(124,58,237,0.35); }
+  50%  { background: rgba(124,58,237,0.12); }
+  100% { background: rgba(124,58,237,0.35); }
+}
+
+.notification-highlight {
+  animation: highlightPulse 1.5s ease-in-out 3;
+  border-radius: 8px;
+}
+
+/* ─── TopBar — Indicador de caja pulse ────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(1.2); }
+}
+
+/* hover:bg-white/8 utility (no disponible en Tailwind por defecto) */
+.hover\:bg-white\/8:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Dark mode: Inputs, Selects y Textareas ─────────────────────── */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #252525 !important;
+  border-color: #3a3a3a !important;
+  color: #ffffff !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-color: #7c3aed !important;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.20) !important;
+  outline: none !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #555555 !important;
+}
+
+/* ─── Dark mode: Botones hover interactivos ──────────────────────── */
+.dark button:not(:disabled):hover {
+  filter: brightness(1.12);
+}
+
+/* Excluir botones con background explícito de lucir diferente */
+.dark button[style*="background"]:not(:disabled):hover {
+  filter: brightness(1.10) saturate(1.05);
+  transform: translateY(-1px);
+}
+
+/* ─── Dark mode: Cards / Panels hover ───────────────────────────── */
+.dark .card:hover,
+.dark [class*="rounded-2xl"]:hover,
+.dark [class*="rounded-xl"]:hover {
+  border-color: rgba(124, 58, 237, 0.25) !important;
+  transition: border-color 0.15s ease;
+}
+
+/* ─── Dark mode: Tablas ──────────────────────────────────────────── */
+.dark .table-kiosko thead tr th {
+  background-color: #191919 !important;
+  color: #909090 !important;
+  border-color: #2e2e2e !important;
+}
+
+.dark .table-kiosko tbody tr td {
+  color: #e0e0e0 !important;
+  border-color: #242424 !important;
+}
+
+.dark .table-kiosko tbody tr:hover td {
+  background-color: rgba(124, 58, 237, 0.06) !important;
+}
+
+/* ─── Dark mode: Badges de estado ───────────────────────────────── */
+.dark .badge {
+  background-color: #2a2a2a;
+}
+
+/* ─── Dark mode: Modales y Overlays ─────────────────────────────── */
+.dark .modal-overlay {
+  background-color: rgba(0, 0, 0, 0.75);
+}
+
+/* ─── Dark mode: select option ──────────────────────────────────── */
+.dark option {
+  background-color: #1c1c1c;
+  color: #ffffff;
+}
