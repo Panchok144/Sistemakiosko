@@ -29,6 +29,7 @@ const rutasNotas = require('./routes/notas');
 const rutasLicencias = require('./routes/licencias');
 const rutasBackup = require('./routes/backup');
 const rutasAlertas = require('./routes/alertas');
+const rutasDemo = require('./routes/demo');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -111,6 +112,8 @@ app.use('/api/notas', authMiddleware, rutasNotas);
 app.use('/api/licencias', authMiddleware, rutasLicencias);
 app.use('/api/backup', authMiddleware, rutasBackup);
 app.use('/api/alertas', authMiddleware, rutasAlertas);
+app.use('/api/demo', authMiddleware, rutasDemo);
+
 
 app.get('/api/saludo', authMiddleware, (req, res) => {
   res.json({ mensaje: '¡Servidor corriendo y listo para el kiosko!' });

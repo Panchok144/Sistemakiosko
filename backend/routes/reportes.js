@@ -402,11 +402,20 @@ router.get('/abc', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-// GET /dashboard-hoy — KPIs del día para el dashboard en tiempo real
+// GET /dashboard-hoy — KPIs del día + badges de módulos + sparklines 7 días
 router.get('/dashboard-hoy', async (req, res, next) => {
   const comercioId = req.usuario?.comercio_id;
   const hoyStr = new Date().toISOString().slice(0, 10);
   const ayerStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+  // Calcular las fechas de los últimos 7 días (inclusive hoy)
+  const ultimos7Dias = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    ultimos7Dias.push(d.toISOString().slice(0, 10));
+  }
+  const fecha7DiasAtras = ultimos7Dias[0];
 
   try {
     const [
@@ -415,23 +424,28 @@ router.get('/dashboard-hoy', async (req, res, next) => {
       topProductosRes,
       cajaActualRes,
       stockCriticoRes,
+      sparklineRes,
+      deudaCCRes,
     ] = await Promise.all([
-      // Ventas de hoy
+      // 1. Ventas de hoy (totales + por método de pago)
       db.query(
         `SELECT
           COUNT(*) AS cantidad_ventas,
           COALESCE(SUM(total), 0) AS ingresos_totales,
           COALESCE(AVG(total), 0) AS ticket_promedio,
-          COALESCE(SUM(CASE WHEN metodo_pago = 'efectivo' THEN total ELSE 0 END), 0) AS efectivo,
-          COALESCE(SUM(CASE WHEN metodo_pago = 'tarjeta' THEN total ELSE 0 END), 0) AS tarjeta,
-          COALESCE(SUM(CASE WHEN metodo_pago = 'transferencia' THEN total ELSE 0 END), 0) AS transferencia
+          COALESCE(SUM(CASE WHEN metodo_pago = 'efectivo'       THEN total ELSE 0 END), 0) AS efectivo,
+          COALESCE(SUM(CASE WHEN metodo_pago = 'tarjeta'        THEN total ELSE 0 END), 0) AS tarjeta,
+          COALESCE(SUM(CASE WHEN metodo_pago = 'transferencia'  THEN total ELSE 0 END), 0) AS transferencia,
+          COALESCE(SUM(CASE WHEN metodo_pago = 'qr'             THEN total ELSE 0 END), 0) AS qr,
+          COALESCE(SUM(CASE WHEN metodo_pago = 'cuenta_corriente' THEN total ELSE 0 END), 0) AS cuenta_corriente
          FROM ventas
          WHERE comercio_id = $1
            AND DATE(fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') = $2
            AND estado != 'error_afip'`,
         [comercioId, hoyStr]
       ),
-      // Ventas de ayer (para comparar)
+
+      // 2. Ventas de ayer (para comparar)
       db.query(
         `SELECT COALESCE(SUM(total), 0) AS ingresos_totales, COUNT(*) AS cantidad_ventas
          FROM ventas
@@ -440,10 +454,11 @@ router.get('/dashboard-hoy', async (req, res, next) => {
            AND estado != 'error_afip'`,
         [comercioId, ayerStr]
       ),
-      // Top 5 productos del día
+
+      // 3. Top 5 productos del día
       db.query(
         `SELECT p.nombre, p.rubro,
-           SUM(dv.cantidad) AS unidades,
+           SUM(dv.cantidad)::int AS unidades,
            SUM(dv.cantidad * dv.precio_unitario) AS facturacion
          FROM detalle_ventas dv
          JOIN ventas v ON dv.id_venta = v.id
@@ -456,7 +471,8 @@ router.get('/dashboard-hoy', async (req, res, next) => {
          LIMIT 5`,
         [comercioId, hoyStr]
       ),
-      // Caja actualmente abierta
+
+      // 4. Caja actualmente abierta
       db.query(
         `SELECT c.id, c.monto_inicial, c.fecha_apertura, u.nombre_usuario
          FROM cajas c
@@ -466,7 +482,8 @@ router.get('/dashboard-hoy', async (req, res, next) => {
          LIMIT 1`,
         [comercioId]
       ),
-      // Productos bajo stock mínimo
+
+      // 5. Productos bajo stock mínimo (badge Inventario)
       db.query(
         `SELECT COUNT(*) AS total FROM productos
          WHERE comercio_id = $1
@@ -476,34 +493,91 @@ router.get('/dashboard-hoy', async (req, res, next) => {
            )`,
         [comercioId]
       ),
+
+      // 6. Sparklines: ventas diarias de los últimos 7 días
+      db.query(
+        `SELECT
+           DATE(fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') AS dia,
+           COALESCE(SUM(total), 0) AS ventas,
+           COUNT(*) AS comprobantes
+         FROM ventas
+         WHERE comercio_id = $1
+           AND DATE(fecha AT TIME ZONE 'America/Argentina/Buenos_Aires') BETWEEN $2 AND $3
+           AND estado != 'error_afip'
+         GROUP BY dia
+         ORDER BY dia ASC`,
+        [comercioId, fecha7DiasAtras, hoyStr]
+      ),
+
+      // 7. Deuda total en cuenta corriente (badge CC)
+      db.query(
+        `SELECT COALESCE(SUM(saldo_pendiente), 0) AS total_deuda
+         FROM clientes
+         WHERE comercio_id = $1 AND saldo_pendiente > 0`,
+        [comercioId]
+      ).catch(() => ({ rows: [{ total_deuda: 0 }] })),
     ]);
 
-    const hoy = ventasHoyRes.rows[0];
-    const ayer = ventasAyerRes.rows[0];
-    const ingresosHoy = parseFloat(hoy.ingresos_totales || 0);
-    const ingresosAyer = parseFloat(ayer.ingresos_totales || 0);
+    const hoyRow = ventasHoyRes.rows[0];
+    const ayerRow = ventasAyerRes.rows[0];
+    const ingresosHoy = parseFloat(hoyRow.ingresos_totales || 0);
+    const ingresosAyer = parseFloat(ayerRow.ingresos_totales || 0);
+    const cantHoy = parseInt(hoyRow.cantidad_ventas || 0);
+    const cantAyer = parseInt(ayerRow.cantidad_ventas || 0);
     const variacionPct = ingresosAyer > 0
       ? ((ingresosHoy - ingresosAyer) / ingresosAyer) * 100
       : null;
+    const variacionCantPct = cantAyer > 0
+      ? ((cantHoy - cantAyer) / cantAyer) * 100
+      : null;
+
+    // Normalizar sparklines: rellenar días sin ventas con 0
+    const sparkMap = {};
+    for (const row of sparklineRes.rows) {
+      const key = typeof row.dia === 'string' ? row.dia : new Date(row.dia).toISOString().slice(0, 10);
+      sparkMap[key] = { ventas: parseFloat(row.ventas || 0), comprobantes: parseInt(row.comprobantes || 0) };
+    }
+    const sparklines_7dias = ultimos7Dias.map((fecha) => ({
+      fecha,
+      ventas: sparkMap[fecha]?.ventas ?? 0,
+      comprobantes: sparkMap[fecha]?.comprobantes ?? 0,
+    }));
+
+    const cajaAbierta = cajaActualRes.rows[0] || null;
+    const stockBajoCount = parseInt(stockCriticoRes.rows[0]?.total || 0);
+    const deudaTotal = parseFloat(deudaCCRes.rows[0]?.total_deuda || 0);
 
     res.json({
       fecha: hoyStr,
       ventas_hoy: {
-        cantidad: parseInt(hoy.cantidad_ventas || 0),
+        cantidad: cantHoy,
         ingresos: ingresosHoy,
-        ticket_promedio: parseFloat(hoy.ticket_promedio || 0),
-        efectivo: parseFloat(hoy.efectivo || 0),
-        tarjeta: parseFloat(hoy.tarjeta || 0),
-        transferencia: parseFloat(hoy.transferencia || 0),
+        ticket_promedio: parseFloat(hoyRow.ticket_promedio || 0),
+        efectivo: parseFloat(hoyRow.efectivo || 0),
+        tarjeta: parseFloat(hoyRow.tarjeta || 0),
+        transferencia: parseFloat(hoyRow.transferencia || 0),
+        qr: parseFloat(hoyRow.qr || 0),
+        cuenta_corriente: parseFloat(hoyRow.cuenta_corriente || 0),
       },
       comparacion_ayer: {
         ingresos_ayer: ingresosAyer,
-        variacion_pct: variacionPct ? parseFloat(variacionPct.toFixed(1)) : null,
+        variacion_pct: variacionPct !== null ? parseFloat(variacionPct.toFixed(1)) : null,
+        variacion_cant_pct: variacionCantPct !== null ? parseFloat(variacionCantPct.toFixed(1)) : null,
         mejor_que_ayer: variacionPct !== null ? variacionPct >= 0 : null,
       },
       top_productos: topProductosRes.rows,
-      caja_abierta: cajaActualRes.rows[0] || null,
-      alertas_stock: parseInt(stockCriticoRes.rows[0]?.total || 0),
+      caja_abierta: cajaAbierta,
+      alertas_stock: stockBajoCount,
+      // ── NUEVO: badges para tarjetas de módulo ─────────────────────────
+      badges_modulos: {
+        stock_bajo: stockBajoCount,
+        deuda_total_cc: deudaTotal,
+        caja_abierta: cajaAbierta
+          ? { abierta: true, desde: cajaAbierta.fecha_apertura, usuario: cajaAbierta.nombre_usuario }
+          : { abierta: false },
+      },
+      // ── NUEVO: sparklines de los últimos 7 días ────────────────────────
+      sparklines_7dias,
     });
   } catch (error) { next(error); }
 });
