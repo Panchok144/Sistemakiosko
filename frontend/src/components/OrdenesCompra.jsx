@@ -173,8 +173,8 @@ export default function OrdenesCompra({ proveedores = [], productos = [] }) {
               ) : (
                 ordenes.map((oc) => {
                   const estadoColors = {
-                    borrador: 'bg-slate-100 text-slate-600',
-                    enviada: 'bg-blue-50 text-blue-700',
+                    borrador: 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300',
+                    enviada: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
                     recibida: 'bg-emerald-50 text-emerald-700',
                     cancelada: 'bg-rose-50 text-rose-700',
                   }[oc.estado] || 'bg-slate-100 text-slate-600';
@@ -250,7 +250,7 @@ export default function OrdenesCompra({ proveedores = [], productos = [] }) {
 
             <div className="flex justify-between items-center pt-2">
               <span className="text-xs text-slate-400">Total OC: <strong className="text-base text-slate-900">${parseFloat(ordenSeleccionada.total).toFixed(2)}</strong></span>
-              <button onClick={() => setOrdenSeleccionada(null)} className="rounded-xl bg-slate-100 px-5 py-2 text-sm font-semibold text-slate-700">Cerrar</button>
+              <button onClick={() => setOrdenSeleccionada(null)} className="rounded-xl bg-slate-100 dark:bg-zinc-700 px-5 py-2 text-sm font-semibold text-slate-700 dark:text-zinc-200">Cerrar</button>
             </div>
           </div>
         </div>

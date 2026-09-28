@@ -1,8 +1,85 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import apiClient from '../apiClient';
 import Swal from 'sweetalert2';
 import { Lock, History, ChevronDown, ChevronRight, AlertTriangle, LayoutGrid, List, CreditCard, DollarSign, ArrowRightLeft, ShieldAlert } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
+
+// ── Emojis por nombre de rubro (kiosko argentino) ─────────────────────────
+const RUBRO_EMOJI = {
+  // Bebidas
+  'Bebidas & Gaseosas':     '🥤',
+  'Bebidas':                '🥤',
+  'Gaseosas':               '🥤',
+  'Agua':                   '💧',
+  'Jugos':                  '🧃',
+  // Alcohol
+  'Cervezas & Vinos':       '🍺',
+  'Cervezas':               '🍺',
+  'Vinos':                  '🍷',
+  'Fernet':                 '🥃',
+  'Bebidas Alcohólicas':    '🍾',
+  // Alfajores / Dulces
+  'Alfajores & Masas':      '🍫',
+  'Alfajores':              '🍫',
+  'Masas':                  '🍰',
+  'Chocolates':             '🍫',
+  'Golosinas & Chocolates': '🍬',
+  'Golosinas':              '🍬',
+  'Caramelos':              '🍭',
+  // Galletitas / Panificados
+  'Galletitas & Panificados': '🍪',
+  'Galletitas':             '🍪',
+  'Panificados':            '🥐',
+  'Pan':                    '🍞',
+  'Facturas':               '🥐',
+  // Snacks
+  'Snacks & Salados':       '🍿',
+  'Snacks':                 '🍿',
+  'Salados':                '🧂',
+  'Papas Fritas':           '🍟',
+  // Almacén
+  'Almacén & Despensa':     '🛒',
+  'Almacén':                '🛒',
+  'Despensa':               '🛒',
+  'Conservas':              '🥫',
+  'Arroz & Pastas':         '🍝',
+  // Helados / Fríos
+  'Helados & Fríos':        '🍦',
+  'Helados':                '🍦',
+  'Fríos':                  '🧊',
+  'Lácteos':                '🥛',
+  'Yogures':                '🥛',
+  // Tabaco
+  'Cigarrillos & Tabacos':  '🚬',
+  'Cigarrillos':            '🚬',
+  'Tabacos':                '🚬',
+  // Librería / Bazar
+  'Librería & Perfumería':  '📚',
+  'Librería':               '📚',
+  'Perfumería':             '🧴',
+  'Higiene':                '🧼',
+  'Limpieza':               '🧹',
+  'Bazar':                  '🏪',
+  // Otros
+  'Carnes':                 '🥩',
+  'Verduras':               '🥦',
+  'Frutas':                 '🍎',
+  'Farmacia':               '💊',
+  'Electrónica':            '🔌',
+  'Sin Categoría':          '📦',
+};
+
+// Fallback: genera emoji por inicial del nombre del rubro
+const RUBRO_EMOJI_DEFAULT = (nombre) => {
+  const iniciales = {
+    'A': '🅰️', 'B': '📦', 'C': '📦', 'D': '📦', 'E': '📦',
+    'F': '📦', 'G': '📦', 'H': '📦', 'I': '📦', 'J': '📦',
+    'K': '📦', 'L': '📦', 'M': '📦', 'N': '📦', 'O': '📦',
+    'P': '📦', 'Q': '📦', 'R': '📦', 'S': '📦', 'T': '📦',
+    'U': '📦', 'V': '📦', 'W': '📦', 'X': '📦', 'Y': '📦', 'Z': '📦',
+  };
+  return iniciales[(nombre || '').charAt(0).toUpperCase()] || '📦';
+};
 
 export default function Ventas({
   productosFiltrados = [],
@@ -27,6 +104,7 @@ export default function Ventas({
   setDescuento,
   isProcessingSale,
   clientes = [],
+  rubrosLista = [],
 }) {
   const [pagaCon, setPagaCon] = useState('');
   const [listasPrecios, setListasPrecios] = useState([]);
@@ -52,17 +130,17 @@ export default function Ventas({
   const barcodeBufferRef = useRef('');
   const lastKeyTimeRef = useRef(0);
 
-  // BUG#8 FIX — inicializar con todas las categorías abiertas para mejor UX en primer uso
-  const [openCategories, setOpenCategories] = useState(() => {
-    const initial = {};
-    const prods = Array.isArray(productosFiltrados) ? productosFiltrados : [];
-    prods.forEach(p => {
-      const cat = p.rubro || 'Sin Categoría';
-      initial[cat] = true; // todas abiertas por defecto
-    });
-    return initial;
-  });
+  // Rubros cerrados por defecto al abrir el punto de venta
+  const [openCategories, setOpenCategories] = useState({});
   const toggleCategory = (cat) => setOpenCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+
+  // Resetear a cerrado cuando se cargan los productos por primera vez
+  const prevRubrosKey = React.useRef('');
+  const currentRubrosKey = [...new Set(productosFiltrados.map(p => p.rubro || 'Sin Categoría'))].sort().join('|');
+  if (prevRubrosKey.current === '' && currentRubrosKey !== '') {
+    prevRubrosKey.current = currentRubrosKey;
+    // No hacer nada — openCategories ya es {} (todos cerrados)
+  }
 
   const groupedProducts = productosFiltrados
     .filter(p => !rubroFiltro || (p.rubro || 'Sin Categoría') === rubroFiltro)
@@ -75,6 +153,14 @@ export default function Ventas({
 
   // Lista de rubros únicos en los productos
   const rubrosDisponibles = [...new Set(productosFiltrados.map(p => p.rubro || 'Sin Categoría'))].sort();
+
+  // Mapa de emojis: BD tiene prioridad, luego fallback estático
+  const emojiMap = React.useMemo(() => {
+    const map = { ...RUBRO_EMOJI };
+    rubrosLista.forEach(r => { if (r.emoji) map[r.nombre] = r.emoji; });
+    return map;
+  }, [rubrosLista]);
+  const getEmojiForRubro = (nombre) => emojiMap[nombre] || RUBRO_EMOJI_DEFAULT(nombre);
 
   // Verificar caja y cargar config al montar
   useEffect(() => {
@@ -388,9 +474,9 @@ export default function Ventas({
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block truncate">{producto.rubro || 'General'}</span>
                         <h3 className="font-bold text-slate-900 dark:text-slate-100 text-sm line-clamp-2 mt-0.5">{producto.nombre}</h3>
                       </div>
-                      <div className="mt-3 flex items-center justify-between border-t border-slate-100 dark:border-slate-700/60 pt-2">
-                        <span className="font-black text-indigo-600 dark:text-indigo-400 text-sm">{formatCurrency(pFinal)}</span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${producto.stock <= 5 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}`}>
+                      <div className="mt-3 flex items-center justify-between border-t border-slate-100 dark:border-zinc-700/60 pt-2">
+                        <span className="font-black text-violet-600 dark:text-violet-400 text-sm">{formatCurrency(pFinal)}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${producto.stock <= 5 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300' : 'bg-violet-50 dark:bg-zinc-700 text-violet-700 dark:text-zinc-200'}`}>
                           Stk: {producto.stock}
                         </span>
                       </div>
@@ -404,16 +490,17 @@ export default function Ventas({
                 {Object.entries(groupedProducts).map(([categoria, prods]) => (
                   <div key={categoria}>
                     <div
-                      className="flex cursor-pointer items-center justify-between bg-slate-100/70 dark:bg-slate-750 px-4 py-3 transition-colors hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                      className="flex cursor-pointer items-center justify-between bg-slate-100/70 dark:bg-zinc-800/80 px-4 py-3 transition-colors hover:bg-slate-200/60 dark:hover:bg-zinc-700/80"
                       onClick={() => toggleCategory(categoria)}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-400">{openCategories[categoria] === false ? '▶' : '▼'}</span>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-base leading-none">{getEmojiForRubro(categoria)}</span>
+                        {openCategories[categoria] ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
                         <span className="font-bold text-slate-900 dark:text-slate-100">{categoria}</span>
-                        <span className="rounded-full bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-bold text-slate-700 dark:text-slate-200">{prods.length}</span>
+                        <span className="rounded-full bg-slate-200 dark:bg-zinc-700 px-2 py-0.5 text-xs font-bold text-slate-700 dark:text-slate-200">{prods.length}</span>
                       </div>
                     </div>
-                    {(openCategories[categoria] !== false) && (
+                    {openCategories[categoria] && (
                       <div className="divide-y divide-slate-100 dark:divide-slate-700 pl-4">
                         {prods.map((producto) => {
                           const pFinal = obtenerPrecioUnitario(producto, 1);
@@ -427,7 +514,11 @@ export default function Ventas({
                                   </span>
                                   <span className="text-xs text-slate-500 dark:text-slate-400">IVA {producto.iva_porcentaje ?? 21}%</span>
                                   <span className="text-slate-300 dark:text-slate-600">•</span>
-                                  <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${producto.stock <= 5 ? 'border-rose-200 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'}`}>
+                                  <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${
+                                    producto.stock <= 5
+                                      ? 'border-rose-200 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                                      : 'border-violet-200 bg-violet-50 dark:bg-zinc-700/80 text-violet-700 dark:text-zinc-200'
+                                  }`}>
                                     Stock: {producto.stock}
                                   </span>
                                 </div>
@@ -435,7 +526,7 @@ export default function Ventas({
                               <button
                                 type="button"
                                 onClick={() => agregarAlCarrito(producto)}
-                                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-indigo-700 hover:shadow-sm"
+                                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white transition-all hover:bg-violet-700 hover:shadow-sm"
                               >
                                 + Agregar
                               </button>

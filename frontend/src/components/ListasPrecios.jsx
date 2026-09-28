@@ -156,7 +156,7 @@ export default function ListasPrecios({ productos = [] }) {
             <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4">Listas Vigentes</h3>
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
               <table className="w-full text-left text-sm text-slate-700 dark:text-slate-300">
-                <thead className="bg-slate-50 dark:bg-slate-750 text-xs uppercase font-semibold text-slate-600 dark:text-slate-300">
+                <thead className="bg-slate-50 dark:bg-zinc-800/80 text-xs uppercase font-semibold text-slate-600 dark:text-zinc-400">
                   <tr>
                     <th className="px-4 py-3">Nombre</th>
                     <th className="px-4 py-3">Ajuste</th>
@@ -173,11 +173,15 @@ export default function ListasPrecios({ productos = [] }) {
                     listas.map((l) => (
                       <tr key={l.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
                         <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">{l.nombre}</td>
-                        <td className="px-4 py-3 font-bold text-indigo-600">
+                        <td className="px-4 py-3 font-bold text-violet-600 dark:text-violet-400">
                           {parseFloat(l.porcentaje_ajuste) >= 0 ? `+${l.porcentaje_ajuste}%` : `${l.porcentaje_ajuste}%`}
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${l.es_mayorista ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            l.es_mayorista
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                              : 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300'
+                          }`}>
                             {l.es_mayorista ? 'Mayorista' : 'Minorista'}
                           </span>
                         </td>
@@ -258,7 +262,7 @@ export default function ListasPrecios({ productos = [] }) {
             <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4">Reglas de Volumen Configuradas</h3>
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
               <table className="w-full text-left text-sm text-slate-700 dark:text-slate-300">
-                <thead className="bg-slate-50 dark:bg-slate-750 text-xs uppercase font-semibold text-slate-600 dark:text-slate-300">
+                <thead className="bg-slate-50 dark:bg-zinc-800/80 text-xs uppercase font-semibold text-slate-600 dark:text-zinc-400">
                   <tr>
                     <th className="px-4 py-3">Producto</th>
                     <th className="px-4 py-3">Cant. Mínima</th>

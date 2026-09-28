@@ -18,8 +18,10 @@ export default function Inventario({
   const [openCategories, setOpenCategories] = useState({});
   const [modalRubros, setModalRubros] = useState(false);
   const [rubroNombre, setRubroNombre] = useState('');
+  const [rubroEmoji, setRubroEmoji] = useState('');
   const [rubroEditId, setRubroEditId] = useState(null);
   const [rubroEditNombre, setRubroEditNombre] = useState('');
+  const [rubroEditEmoji, setRubroEditEmoji] = useState('');
   const location = useLocation();
 
   // Read deep-link params from notification bell
@@ -116,12 +118,13 @@ export default function Inventario({
       const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/rubros`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('kiosko_token') || ''}` },
-        body: JSON.stringify({ nombre: rubroNombre })
+        body: JSON.stringify({ nombre: rubroNombre, emoji: rubroEmoji || null })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       Swal.fire('Éxito', 'Rubro creado', 'success');
       setRubroNombre('');
+      setRubroEmoji('');
       cargarRubros();
     } catch (err) {
       Swal.fire('Error', err.message, 'error');
@@ -149,12 +152,13 @@ export default function Inventario({
       const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/rubros/${rubroEditId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('kiosko_token') || ''}` },
-        body: JSON.stringify({ nombre: rubroEditNombre })
+        body: JSON.stringify({ nombre: rubroEditNombre, emoji: rubroEditEmoji || null })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setRubroEditId(null);
       setRubroEditNombre('');
+      setRubroEditEmoji('');
       cargarRubros();
       cargarProductos();
     } catch (err) {
@@ -639,57 +643,102 @@ export default function Inventario({
       </section>
 
       {/* Modal Administrar Rubros */}
-      {modalRubros && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm transition-all">
-          <div className="w-full max-w-lg rounded-[2rem] bg-white dark:bg-slate-800 p-8 shadow-2xl border border-slate-200 dark:border-slate-700">
-            <div className="mb-6 flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-5">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Administrar Rubros</h3>
-              <button type="button" onClick={() => setModalRubros(false)} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
-                <span className="text-xl leading-none">&times;</span>
-              </button>
-            </div>
-            <form onSubmit={crearRubro} className="mb-6 flex gap-2">
-              <input type="text" value={rubroNombre} onChange={(e) => setRubroNombre(e.target.value)} placeholder="Nuevo rubro..." className={inp} required />
-              <button type="submit" className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-700">Agregar</button>
-            </form>
-            <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
-              <table className="w-full text-left text-sm text-slate-700 dark:text-slate-300">
-                <tbody>
-                  {rubrosLista.map(r => (
-                    <tr key={r.id} className="border-b border-slate-100 dark:border-slate-700/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/40">
-                      <td className="px-4 py-3">
-                        {rubroEditId === r.id ? (
-                          <input type="text" className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-sm text-slate-900 dark:text-slate-100 outline-none" value={rubroEditNombre} onChange={(e) => setRubroEditNombre(e.target.value)} autoFocus />
-                        ) : (
-                          <span className="font-bold text-slate-800 dark:text-slate-200">{r.nombre}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {rubroEditId === r.id ? (
-                          <div className="flex justify-end gap-2">
-                            <button type="button" onClick={guardarEdicionRubro} className="text-emerald-600 dark:text-emerald-400 hover:underline font-bold">Guardar</button>
-                            <button type="button" onClick={() => setRubroEditId(null)} className="text-slate-500 dark:text-slate-400 hover:underline">Cancelar</button>
-                          </div>
-                        ) : (
-                          <div className="flex justify-end gap-2">
-                            <button type="button" onClick={() => { setRubroEditId(r.id); setRubroEditNombre(r.nombre); }} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800" title="Editar">✏️</button>
-                            <button type="button" onClick={() => eliminarRubro(r.id)} className="text-rose-600 dark:text-rose-400 hover:text-rose-800" title="Eliminar">🗑️</button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {rubrosLista.length === 0 && (
-                    <tr>
-                      <td colSpan="2" className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">No hay rubros creados.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+      {modalRubros && (() => {
+        const EMOJIS_KIOSKO = [
+          '🥤','🧃','💧','🍺','🍷','🥃','🍾',
+          '🍫','🍬','🍭','🍪','🥐','🍞','🍰',
+          '🍿','🧂','🍟','🥫','🍝','🛒','📦',
+          '🍦','🧊','🥛','🚬','📚','🧴','🧼',
+          '🧹','🏪','🥩','🥦','🍎','💊','🔌',
+          '🎁','🧸','⚽','🎮','🖊️','📋','🔑',
+          '🧺','🌿','🌸','🧆','🥜','🧇','🥚',
+        ];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-[2rem] bg-white dark:bg-slate-800 p-8 shadow-2xl border border-slate-200 dark:border-slate-700">
+              <div className="mb-6 flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-5">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Administrar Rubros</h3>
+                <button type="button" onClick={() => setModalRubros(false)} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
+                  <span className="text-xl leading-none">&times;</span>
+                </button>
+              </div>
+
+              {/* Form crear nuevo rubro */}
+              <form onSubmit={crearRubro} className="mb-6 space-y-3">
+                <div className="flex gap-2">
+                  <div className="flex items-center justify-center w-11 h-11 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-2xl flex-shrink-0">
+                    {rubroEmoji || '📦'}
+                  </div>
+                  <input type="text" value={rubroNombre} onChange={(e) => setRubroNombre(e.target.value)} placeholder="Nombre del nuevo rubro..." className={inp} required />
+                  <button type="submit" className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-700 flex-shrink-0">Agregar</button>
+                </div>
+                {/* Selector de emojis para rubro nuevo */}
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Elegir emoji</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {EMOJIS_KIOSKO.map(em => (
+                      <button
+                        key={em} type="button"
+                        onClick={() => setRubroEmoji(rubroEmoji === em ? '' : em)}
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg text-base transition-all ${rubroEmoji === em ? 'ring-2 ring-violet-500 bg-violet-50 dark:bg-violet-900/40 scale-110' : 'hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                        title={em}
+                      >{em}</button>
+                    ))}
+                  </div>
+                </div>
+              </form>
+
+              {/* Lista de rubros existentes */}
+              <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-left text-sm text-slate-700 dark:text-slate-300">
+                  <tbody>
+                    {rubrosLista.map(r => (
+                      <tr key={r.id} className="border-b border-slate-100 dark:border-slate-700/60 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                        <td className="px-4 py-3 w-10 text-center text-xl">{r.emoji || '📦'}</td>
+                        <td className="px-2 py-3">
+                          {rubroEditId === r.id ? (
+                            <div className="space-y-2">
+                              <input type="text" className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 py-1 text-sm text-slate-900 dark:text-slate-100 outline-none" value={rubroEditNombre} onChange={(e) => setRubroEditNombre(e.target.value)} autoFocus />
+                              <div className="flex flex-wrap gap-1">
+                                {EMOJIS_KIOSKO.map(em => (
+                                  <button
+                                    key={em} type="button"
+                                    onClick={() => setRubroEditEmoji(rubroEditEmoji === em ? '' : em)}
+                                    className={`flex h-7 w-7 items-center justify-center rounded-md text-sm transition-all ${rubroEditEmoji === em ? 'ring-2 ring-violet-500 bg-violet-50 dark:bg-violet-900/40 scale-110' : 'hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                                  >{em}</button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{r.nombre}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {rubroEditId === r.id ? (
+                            <div className="flex justify-end gap-2">
+                              <button type="button" onClick={guardarEdicionRubro} className="text-emerald-600 dark:text-emerald-400 hover:underline font-bold text-xs">Guardar</button>
+                              <button type="button" onClick={() => { setRubroEditId(null); setRubroEditEmoji(''); }} className="text-slate-500 dark:text-slate-400 hover:underline text-xs">Cancelar</button>
+                            </div>
+                          ) : (
+                            <div className="flex justify-end gap-2">
+                              <button type="button" onClick={() => { setRubroEditId(r.id); setRubroEditNombre(r.nombre); setRubroEditEmoji(r.emoji || ''); }} className="text-violet-600 dark:text-violet-400 hover:text-violet-800 text-sm" title="Editar">✏️</button>
+                              <button type="button" onClick={() => eliminarRubro(r.id)} className="text-rose-600 dark:text-rose-400 hover:text-rose-800 text-sm" title="Eliminar">🗑️</button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {rubrosLista.length === 0 && (
+                      <tr><td colSpan="3" className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">No hay rubros creados.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
 
       {/* Modal Editar Producto */}
       {modalEditarProd && (

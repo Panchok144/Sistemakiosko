@@ -245,7 +245,7 @@ export default function Devoluciones() {
                     <td className="px-4 py-3">{new Date(d.fecha).toLocaleString()}</td>
                     <td className="px-4 py-3 text-slate-600">{d.motivo || 'Sin motivo'}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${d.devuelto_caja ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${d.devuelto_caja ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300'}`}>
                         {d.devuelto_caja ? 'Sí' : 'No'}
                       </span>
                     </td>

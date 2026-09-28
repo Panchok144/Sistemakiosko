@@ -777,6 +777,7 @@ function AppContent() {
               setDescuento={setDescuento}
               isProcessingSale={isProcessingSale}
               clientes={clientes}
+              rubrosLista={rubrosLista}
             />
           } />
           <Route path="/inventario" element={

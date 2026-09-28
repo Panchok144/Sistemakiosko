@@ -64,8 +64,8 @@ export default function Proveedores({
     setModalEditar(false)
   }
 
-  const inp = 'w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10';
-  const lbl = 'mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500';
+  const inp = 'w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 outline-none transition focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10';
+  const lbl = 'mb-1 block text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400';
 
   return (
     <div className="space-y-5">
@@ -74,7 +74,7 @@ export default function Proveedores({
           <div className="mb-5 flex items-center gap-3">
             <span className="text-3xl">🤝</span>
             <div>
-              <h2 className="text-xl font-semibold tracking-tight text-slate-900">Registrar Proveedor</h2>
+              <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Registrar Proveedor</h2>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Añade nuevos proveedores a tu red de contactos.</p>
             </div>
           </div>
@@ -153,51 +153,51 @@ export default function Proveedores({
         <div className="flex items-center gap-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-6 text-slate-600 shadow-sm">
           <span className="text-4xl text-slate-300">🔒</span>
           <div>
-            <strong className="mb-1 block text-lg text-slate-900">Acceso Restringido</strong>
-            Tu cuenta no permite administrar proveedores.
+            <strong className="mb-1 block text-lg text-slate-900 dark:text-slate-100">Acceso Restringido</strong>
+            <span className="text-slate-600 dark:text-slate-400">Tu cuenta no permite administrar proveedores.</span>
           </div>
         </div>
       )}
 
       <section className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-6 shadow-sm">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-900">Directorio de Proveedores</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Directorio de Proveedores</h2>
           <input
             type="text"
             placeholder="Buscar por nombre o CUIT..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full max-w-sm rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10"
+            className="w-full max-w-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-2 text-sm text-slate-900 dark:text-slate-100 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 placeholder:text-slate-400 dark:placeholder:text-slate-500"
           />
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtrados.map((prov) => (
-            <div key={prov.id} className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 p-4 transition-all hover:border-indigo-200 hover:bg-white hover:shadow-sm">
+            <div key={prov.id} className="flex flex-col rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 p-4 transition-all hover:border-indigo-200 dark:hover:border-indigo-700/60 hover:bg-white dark:hover:bg-slate-800 hover:shadow-sm">
               <div className="mb-3 flex items-start justify-between">
                 <div>
                   <h3 className="font-semibold text-slate-900 dark:text-slate-100">{prov.nombre}</h3>
-                  {prov.cuit && <p className="text-xs text-slate-500 mt-0.5">CUIT: {prov.cuit}</p>}
+                  {prov.cuit && <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">CUIT: {prov.cuit}</p>}
                   {prov.condicion_fiscal && (
-                    <span className="inline-block mt-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                    <span className="inline-block mt-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300">
                       {COND_FISCAL.find(c => c.value === prov.condicion_fiscal)?.label || prov.condicion_fiscal}
                     </span>
                   )}
                 </div>
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-sm text-indigo-700">🏢</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 dark:bg-indigo-950/60 text-sm text-indigo-700">🏢</span>
               </div>
-              <div className="mt-auto space-y-1.5 text-sm text-slate-600">
+              <div className="mt-auto space-y-1.5 text-sm text-slate-600 dark:text-slate-400">
                 {prov.telefono && <div className="flex items-center gap-2"><span>📞</span>{prov.telefono}</div>}
                 {prov.email && <div className="flex items-center gap-2"><span>✉️</span>{prov.email}</div>}
                 {(prov.domicilio || prov.direccion) && <div className="flex items-center gap-2"><span>📍</span>{prov.domicilio || prov.direccion}</div>}
-                {prov.codigo_fiscal && <div className="flex items-center gap-2 text-xs text-slate-400"><span>🔖</span>CF: {prov.codigo_fiscal}</div>}
-                {prov.descripcion && <p className="mt-2 text-xs italic text-slate-400">"{prov.descripcion}"</p>}
+                {prov.codigo_fiscal && <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500"><span>🔖</span>CF: {prov.codigo_fiscal}</div>}
+                {prov.descripcion && <p className="mt-2 text-xs italic text-slate-400 dark:text-slate-500">"{prov.descripcion}"</p>}
               </div>
               {canManageCatalog && (
-                <div className="mt-4 flex gap-2 border-t border-slate-100 pt-3">
-                  <button onClick={() => { setEditDatos({...prov}); setModalEditar(true); }} className="flex-1 rounded-xl bg-amber-50 py-1.5 text-xs font-semibold text-amber-700 transition-all hover:bg-amber-600 hover:text-white">
+                <div className="mt-4 flex gap-2 border-t border-slate-100 dark:border-slate-700 pt-3">
+                  <button onClick={() => { setEditDatos({ ...prov }); setModalEditar(true); }} className="flex-1 rounded-xl bg-amber-50 dark:bg-amber-900/30 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300 transition-all hover:bg-amber-600 hover:text-white">
                     ✏️ Editar
                   </button>
-                  <button onClick={() => eliminarProveedor(prov.id)} className="flex-1 rounded-xl bg-rose-50 py-1.5 text-xs font-semibold text-rose-600 transition-all hover:bg-rose-600 hover:text-white">
+                  <button onClick={() => eliminarProveedor(prov.id)} className="flex-1 rounded-xl bg-rose-50 dark:bg-rose-900/30 py-1.5 text-xs font-semibold text-rose-600 dark:text-rose-400 transition-all hover:bg-rose-600 hover:text-white">
                     🗑️ Eliminar
                   </button>
                 </div>
@@ -217,53 +217,53 @@ export default function Proveedores({
       {modalEditar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm transition-all">
           <div className="w-full max-w-2xl rounded-[2rem] bg-white dark:bg-slate-800 p-8 shadow-2xl border border-slate-200 dark:border-slate-700 border border-slate-100 max-h-[90vh] overflow-y-auto">
-            <div className="mb-6 flex items-center justify-between border-b border-slate-100 pb-5">
+            <div className="mb-6 flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-5">
               <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100">Editar Proveedor</h3>
-              <button type="button" onClick={() => setModalEditar(false)} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors">
+              <button type="button" onClick={() => setModalEditar(false)} className="flex items-center justify-center w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors">
                 <span className="text-xl leading-none">&times;</span>
               </button>
             </div>
             <form onSubmit={guardarEdicion} className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className={lbl}>Nombre / Razón Social *</label>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" type="text" value={editDatos.nombre || ''} onChange={(e) => setEditDatos({ ...editDatos, nombre: e.target.value })} required />
+                <input className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" type="text" value={editDatos.nombre || ''} onChange={(e) => setEditDatos({ ...editDatos, nombre: e.target.value })} required />
               </div>
               <div>
                 <label className={lbl}>CUIT</label>
                 <input
-                  className={`w-full rounded-xl border px-3 py-2.5 text-sm ${cuitInvalid(editDatos.cuit) ? 'border-rose-400 bg-rose-50' : 'border-slate-200'}`}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 ${cuitInvalid(editDatos.cuit) ? 'border-rose-400 bg-rose-50' : 'border-slate-200 dark:border-slate-700'}`}
                   type="text" value={editDatos.cuit || ''} onChange={(e) => setEditDatos({ ...editDatos, cuit: e.target.value })}
                 />
                 {cuitInvalid(editDatos.cuit) && <p className="mt-1 text-xs text-rose-600">⚠️ CUIT inválido</p>}
               </div>
               <div>
                 <label className={lbl}>Condición Fiscal</label>
-                <select className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" value={editDatos.condicion_fiscal || ''} onChange={(e) => setEditDatos({ ...editDatos, condicion_fiscal: e.target.value })}>
+                <select className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" value={editDatos.condicion_fiscal || ''} onChange={(e) => setEditDatos({ ...editDatos, condicion_fiscal: e.target.value })}>
                   {COND_FISCAL.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </div>
               <div>
                 <label className={lbl}>Código Fiscal (ARCA/AFIP)</label>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" type="text" value={editDatos.codigo_fiscal || ''} onChange={(e) => setEditDatos({ ...editDatos, codigo_fiscal: e.target.value })} />
+                <input className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" type="text" value={editDatos.codigo_fiscal || ''} onChange={(e) => setEditDatos({ ...editDatos, codigo_fiscal: e.target.value })} />
               </div>
               <div>
                 <label className={lbl}>Teléfono</label>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" type="text" value={editDatos.telefono || ''} onChange={(e) => setEditDatos({ ...editDatos, telefono: e.target.value })} />
+                <input className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" type="text" value={editDatos.telefono || ''} onChange={(e) => setEditDatos({ ...editDatos, telefono: e.target.value })} />
               </div>
               <div>
                 <label className={lbl}>Email</label>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" type="email" value={editDatos.email || ''} onChange={(e) => setEditDatos({ ...editDatos, email: e.target.value })} />
+                <input className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" type="email" value={editDatos.email || ''} onChange={(e) => setEditDatos({ ...editDatos, email: e.target.value })} />
               </div>
               <div className="md:col-span-2">
                 <label className={lbl}>Domicilio Comercial</label>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" type="text" value={editDatos.domicilio || editDatos.direccion || ''} onChange={(e) => setEditDatos({ ...editDatos, domicilio: e.target.value, direccion: e.target.value })} />
+                <input className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" type="text" value={editDatos.domicilio || editDatos.direccion || ''} onChange={(e) => setEditDatos({ ...editDatos, domicilio: e.target.value, direccion: e.target.value })} />
               </div>
               <div className="md:col-span-2">
                 <label className={lbl}>Observaciones</label>
-                <textarea className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" rows="2" value={editDatos.descripcion || ''} onChange={(e) => setEditDatos({ ...editDatos, descripcion: e.target.value })}></textarea>
+                <textarea className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100" rows="2" value={editDatos.descripcion || ''} onChange={(e) => setEditDatos({ ...editDatos, descripcion: e.target.value })}></textarea>
               </div>
               <div className="col-span-full mt-4 flex justify-end gap-3">
-                <button type="button" onClick={() => setModalEditar(false)} className="rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100">Cancelar</button>
+                <button type="button" onClick={() => setModalEditar(false)} className="rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-600 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-slate-700">Cancelar</button>
                 <button type="submit" className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-indigo-700">Guardar Cambios</button>
               </div>
             </form>

@@ -141,24 +141,24 @@ function NotificationBell() {
           className="absolute top-full right-0 mt-2 z-50"
           style={{
             width: '300px',
-            background: '#1c1c1c',
-            border: '1px solid #333333',
+            background: 'var(--dropdown-bg)',
+            border: '1px solid var(--dropdown-border)',
             borderRadius: '14px',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.70), 0 0 0 1px rgba(255,255,255,0.04)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.20), 0 0 0 1px rgba(0,0,0,0.04)',
             animation: 'dropdownFadeIn 0.18s ease-out',
           }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #2e2e2e' }}>
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-[#2e2e2e]">
             <div className="flex items-center gap-2">
               <Bell size={13} style={{ color: '#a78bfa' }} />
-              <span className="text-xs font-black text-white tracking-wide">Notificaciones</span>
+              <span className="text-xs font-black text-slate-900 dark:text-white tracking-wide">Notificaciones</span>
               <span className="rounded-full px-1.5 py-0.5 text-[9px] font-black" style={{ background: hayAltasOCriticas ? '#ef4444' : '#f59e0b', color: '#fff' }}>
                 {totalVisible}
               </span>
             </div>
-            <button onClick={handleClearAll} title="Limpiar todas" className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all hover:bg-white/10" style={{ color: 'rgba(196,181,253,0.60)' }}>
+            <button onClick={handleClearAll} title="Limpiar todas" className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-all hover:bg-slate-100 dark:hover:bg-white/10 text-slate-500 dark:text-[rgba(196,181,253,0.60)]">
               <Trash2 size={10} />Limpiar
             </button>
           </div>
@@ -168,29 +168,29 @@ function NotificationBell() {
               const cfg = urgencyConfig[alerta.urgencia] || urgencyConfig.media;
               const UrgIcon = cfg.Icon;
               return (
-                <div key={idx} style={{ borderBottom: '1px solid rgba(124,58,237,0.10)' }}>
-                  <button onClick={() => handleAlertClick(alerta)} className="flex w-full items-start gap-3 px-4 py-3 text-left transition-all hover:bg-white/5">
+                <div key={idx} className="border-b border-slate-100 dark:border-[rgba(124,58,237,0.10)] last:border-0">
+                  <button onClick={() => handleAlertClick(alerta)} className="flex w-full items-start gap-3 px-4 py-3 text-left transition-all hover:bg-slate-50 dark:hover:bg-white/5">
                     <div className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-lg mt-0.5" style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
                       <UrgIcon size={13} style={{ color: cfg.color }} />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="text-xs font-bold truncate" style={{ color: '#e5e7eb' }}>{alerta.titulo}</p>
+                        <p className="text-xs font-bold truncate text-slate-800 dark:text-[#e5e7eb]">{alerta.titulo}</p>
                         <span className="flex-shrink-0 rounded px-1 py-0.5 text-[8px] font-black uppercase" style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>{cfg.label}</span>
                       </div>
-                      <p className="text-[10px] mt-0.5 leading-relaxed" style={{ color: 'rgba(196,181,253,0.65)' }}>{alerta.descripcion}</p>
+                      <p className="text-[10px] mt-0.5 leading-relaxed text-slate-500 dark:text-[rgba(196,181,253,0.65)]">{alerta.descripcion}</p>
                     </div>
                     <ChevronRight size={12} className="flex-shrink-0 mt-1" style={{ color: 'rgba(124,58,237,0.50)' }} />
                   </button>
                   {alerta.items && alerta.items.length > 0 && (
-                    <div style={{ background: 'rgba(0,0,0,0.20)' }}>
+                    <div className="bg-slate-50 dark:bg-[rgba(0,0,0,0.20)]">
                       {alerta.items.slice(0, 5).map((item) => (
-                        <button key={item.id} onClick={() => handleAlertClick(alerta, item)} className="flex w-full items-center gap-3 px-5 py-2 text-left transition-all hover:bg-white/5">
+                        <button key={item.id} onClick={() => handleAlertClick(alerta, item)} className="flex w-full items-center gap-3 px-5 py-2 text-left transition-all hover:bg-slate-100 dark:hover:bg-white/5">
                           <div className="flex-shrink-0 h-1.5 w-1.5 rounded-full" style={{ background: cfg.color }} />
                           <div className="flex-1 min-w-0">
-                            <p className="text-[11px] font-semibold truncate" style={{ color: '#d1d5db' }}>{item.nombre}</p>
+                            <p className="text-[11px] font-semibold truncate text-slate-700 dark:text-[#d1d5db]">{item.nombre}</p>
                             <div className="flex items-center gap-2 mt-0.5">
-                              {item.rubro && <span className="text-[9px]" style={{ color: 'rgba(167,139,250,0.60)' }}>{item.rubro}</span>}
+                              {item.rubro && <span className="text-[9px] text-slate-500 dark:text-[rgba(167,139,250,0.60)]">{item.rubro}</span>}
                               {item.stock !== undefined && (
                                 <span className="text-[9px] font-bold" style={{ color: item.stock === 0 ? '#ef4444' : cfg.color }}>
                                   Stock: {item.stock}{item.stock_minimo > 0 && ` / mín. ${item.stock_minimo}`}
@@ -202,7 +202,7 @@ function NotificationBell() {
                         </button>
                       ))}
                       {alerta.items.length > 5 && (
-                        <button onClick={() => handleAlertClick(alerta)} className="flex w-full items-center justify-center gap-1 py-1.5 text-[10px] font-semibold transition-all hover:bg-white/5" style={{ color: '#a78bfa' }}>
+                        <button onClick={() => handleAlertClick(alerta)} className="flex w-full items-center justify-center gap-1 py-1.5 text-[10px] font-semibold transition-all hover:bg-slate-100 dark:hover:bg-white/5" style={{ color: '#a78bfa' }}>
                           Ver {alerta.items.length - 5} más...
                         </button>
                       )}
@@ -213,8 +213,8 @@ function NotificationBell() {
             })}
           </div>
 
-          <div className="px-4 py-2.5" style={{ borderTop: '1px solid rgba(124,58,237,0.15)' }}>
-            <button onClick={() => { navigate('/inventario'); setOpen(false); }} className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-bold transition-all hover:bg-violet-500/15" style={{ color: '#a78bfa' }}>
+          <div className="px-4 py-2.5 border-t border-slate-100 dark:border-[rgba(124,58,237,0.15)]">
+            <button onClick={() => { navigate('/inventario'); setOpen(false); }} className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[10px] font-bold transition-all hover:bg-violet-50 dark:hover:bg-violet-500/15" style={{ color: '#a78bfa' }}>
               Ver todo en Inventario <ChevronRight size={10} />
             </button>
           </div>
@@ -294,7 +294,7 @@ function UserMenu({ user, logout, theme, toggleTheme }) {
           {initials}
         </div>
         <div className="hidden sm:block text-left leading-none">
-          <p className="text-[11px] font-bold truncate max-w-[80px] text-white">{user?.nombre || user?.nombre_usuario}</p>
+          <p className="text-[11px] font-bold truncate max-w-[80px] text-slate-900 dark:text-white">{user?.nombre || user?.nombre_usuario}</p>
           <p className="text-[10px] capitalize" style={{ color: '#a78bfa' }}>{user?.rol}</p>
         </div>
         <ChevronRight size={12} className={`flex-shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} style={{ color: 'rgba(148,163,184,0.5)' }} />
@@ -304,16 +304,16 @@ function UserMenu({ user, logout, theme, toggleTheme }) {
         <div
           className="absolute top-full right-0 mt-2 z-50 w-52"
           style={{
-            background: '#1c1c1c',
-            border: '1px solid #333333',
+            background: 'var(--dropdown-bg, #ffffff)',
+            border: '1px solid var(--dropdown-border, #e2e8f0)',
             borderRadius: '14px',
-            boxShadow: '0 16px 48px rgba(0,0,0,0.70)',
+            boxShadow: '0 16px 48px rgba(0,0,0,0.18)',
             animation: 'dropdownFadeIn 0.15s ease-out',
           }}
         >
           {/* Info usuario */}
-          <div className="px-4 py-3" style={{ borderBottom: '1px solid #2e2e2e' }}>
-            <p className="text-xs font-bold text-white truncate">{user?.nombre || user?.nombre_usuario}</p>
+          <div className="px-4 py-3 border-b border-slate-100 dark:border-[#2e2e2e]">
+            <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{user?.nombre || user?.nombre_usuario}</p>
             <p className="text-[10px] capitalize mt-0.5" style={{ color: '#a78bfa' }}>{user?.rol}</p>
           </div>
 
@@ -321,8 +321,7 @@ function UserMenu({ user, logout, theme, toggleTheme }) {
           <div className="p-2">
             <button
               onClick={() => { toggleTheme(); }}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-semibold transition-all hover:bg-white/8"
-              style={{ color: 'rgba(196,181,253,0.80)' }}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-semibold transition-all hover:bg-slate-100 dark:hover:bg-white/8 text-slate-700 dark:text-[rgba(196,181,253,0.80)]"
             >
               {theme === 'dark'
                 ? <Moon size={14} style={{ color: '#fbbf24' }} />
@@ -334,7 +333,7 @@ function UserMenu({ user, logout, theme, toggleTheme }) {
             {/* Logout */}
             <button
               onClick={() => { setOpen(false); logout(); }}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-semibold transition-all hover:bg-rose-500/12 mt-0.5"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-xs font-semibold transition-all hover:bg-rose-50 dark:hover:bg-rose-500/12 mt-0.5"
               style={{ color: '#f87171' }}
             >
               <LogOut size={14} />
@@ -372,9 +371,9 @@ export default function TopBar() {
     <header
       className="flex items-center gap-3 px-4 h-14 flex-shrink-0 relative z-30"
       style={{
-        background: 'linear-gradient(90deg, #171717 0%, #111111 60%, #0d0d0d 100%)',
-        borderBottom: '1px solid #2e2e2e',
-        boxShadow: '0 1px 12px rgba(0,0,0,0.50)',
+        background: 'linear-gradient(90deg, #1c1c1f 0%, #18181b 60%, #141417 100%)',
+        borderBottom: '1px solid #3f3f46',
+        boxShadow: '0 1px 12px rgba(0,0,0,0.40)',
       }}
     >
       {/* Logo */}
@@ -382,7 +381,7 @@ export default function TopBar() {
         <NavLink to="/" className="flex items-center gap-2">
           <div
             className="flex h-8 w-8 items-center justify-center rounded-xl text-white"
-            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 3px 12px rgba(124,58,237,0.40)' }}
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)', boxShadow: '0 3px 12px rgba(139,92,246,0.40)' }}
           >
             <Zap size={15} className="fill-current" />
           </div>
@@ -393,7 +392,7 @@ export default function TopBar() {
       </div>
 
       {/* Separador */}
-      <div className="h-5 w-px flex-shrink-0" style={{ background: 'rgba(124,58,237,0.25)' }} />
+      <div className="h-5 w-px flex-shrink-0" style={{ background: 'rgba(139,92,246,0.25)' }} />
 
       {/* Módulo activo (breadcrumb) + botón Inicio */}
       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -428,8 +427,8 @@ export default function TopBar() {
           title="Buscar (Ctrl+K)"
           className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs transition-all"
           style={{
-            background: 'rgba(124,58,237,0.10)',
-            border: '1px solid rgba(124,58,237,0.22)',
+            background: 'rgba(139,92,246,0.10)',
+            border: '1px solid rgba(139,92,246,0.22)',
             color: 'rgba(196,181,253,0.75)',
           }}
         >
@@ -437,7 +436,7 @@ export default function TopBar() {
           <span className="hidden md:block font-medium">Buscar...</span>
           <kbd
             className="hidden md:block rounded px-1.5 py-0.5 text-[10px] font-bold"
-            style={{ background: 'rgba(124,58,237,0.22)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.25)' }}
+            style={{ background: 'rgba(139,92,246,0.22)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.25)' }}
           >
             Ctrl K
           </kbd>
