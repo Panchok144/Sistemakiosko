@@ -2,10 +2,25 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/conexion');
 const { registrarAuditoria } = require('../services/auditoriaService');
+const { cents, fromCents, round2 } = require('../utils/money');
+
+const METODOS_PERMITIDOS = [
+  'efectivo',
+  'tarjeta_debito',
+  'tarjeta_credito',
+  'transferencia',
+  'qr',
+  'cuenta_corriente',
+  'otro'
+];
 
 router.get('/estado', async (req, res) => {
   const usuarioId = req.usuario?.id;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+
+  if (!comercioId || !usuarioId) {
+    return res.status(401).json({ error: 'No autorizado: sesión inválida' });
+  }
 
   try {
     const result = await db.query(
@@ -25,7 +40,11 @@ router.get('/estado', async (req, res) => {
 });
 
 router.get('/historial', async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: sesión inválida' });
+  }
 
   try {
     const result = await db.query(
@@ -41,12 +60,18 @@ router.get('/historial', async (req, res) => {
 
 router.post('/abrir', async (req, res) => {
   const usuarioId = req.usuario?.id;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const { monto_inicial } = req.body;
 
-  if (monto_inicial == null) {
-    return res.status(400).json({ error: 'Monto inicial obligatorio' });
+  if (!comercioId || !usuarioId) {
+    return res.status(401).json({ error: 'No autorizado: sesión inválida' });
   }
+
+  if (monto_inicial == null || isNaN(Number(monto_inicial))) {
+    return res.status(400).json({ error: 'Monto inicial obligatorio y debe ser numérico' });
+  }
+
+  const montoInicialVal = fromCents(cents(monto_inicial));
 
   try {
     const openBox = await db.query(
@@ -60,12 +85,12 @@ router.post('/abrir', async (req, res) => {
 
     const result = await db.query(
       'INSERT INTO cajas (id_usuario, monto_inicial, comercio_id) VALUES ($1, $2, $3) RETURNING id',
-      [usuarioId, monto_inicial, comercioId]
+      [usuarioId, montoInicialVal, comercioId]
     );
 
     await registrarAuditoria({
       tipo_evento: 'CAJA_APERTURA',
-      descripcion: `Se abrió la caja con un monto inicial de $${monto_inicial}`,
+      descripcion: `Se abrió la caja con un monto inicial de $${montoInicialVal}`,
       usuario_id: usuarioId,
       comercio_id: comercioId
     });
@@ -78,29 +103,43 @@ router.post('/abrir', async (req, res) => {
 });
 
 router.post('/:id_caja/movimiento', async (req, res) => {
-  const { tipo, monto, descripcion } = req.body;
+  const { tipo, monto, descripcion, metodo_pago = 'efectivo' } = req.body;
   const { id_caja } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const usuarioId = req.usuario?.id;
   const rolUsuario = req.usuario?.rol;
 
-  if (!tipo || monto == null || !descripcion) {
-    return res.status(400).json({ error: 'Tipo, monto y descripción son obligatorios' });
+  if (!comercioId || !usuarioId) {
+    return res.status(401).json({ error: 'No autorizado: sesión inválida' });
   }
 
-  if (parseFloat(monto) <= 0) {
-    return res.status(400).json({ error: 'El monto del movimiento debe ser mayor a 0' });
+  if (!tipo || !['ingreso', 'egreso'].includes(tipo)) {
+    return res.status(400).json({ error: 'El tipo debe ser "ingreso" o "egreso"' });
   }
+
+  if (monto == null || isNaN(Number(monto)) || parseFloat(monto) <= 0) {
+    return res.status(400).json({ error: 'El monto del movimiento debe ser un número mayor a 0' });
+  }
+
+  if (!descripcion || typeof descripcion !== 'string' || !descripcion.trim()) {
+    return res.status(400).json({ error: 'La descripción es obligatoria' });
+  }
+
+  const metodoFinal = METODOS_PERMITIDOS.includes(metodo_pago) ? metodo_pago : 'efectivo';
+  const montoVal = fromCents(cents(monto));
 
   try {
-    // BUG-15 FIX: Verificar que el usuario sea dueño de la caja o tenga rol admin/dueño
     const boxCheck = await db.query(
-      'SELECT id, id_usuario FROM cajas WHERE id = $1 AND comercio_id = $2 LIMIT 1',
+      'SELECT id, id_usuario, estado FROM cajas WHERE id = $1 AND comercio_id = $2 LIMIT 1',
       [id_caja, comercioId]
     );
 
     if (boxCheck.rowCount === 0) {
       return res.status(404).json({ error: 'Caja no encontrada para este comercio' });
+    }
+
+    if (boxCheck.rows[0].estado !== 'abierta') {
+      return res.status(400).json({ error: 'No se pueden registrar movimientos en una caja cerrada' });
     }
 
     const esAdmin = ['administrador', 'dueno', 'superadmin'].includes(rolUsuario);
@@ -110,10 +149,18 @@ router.post('/:id_caja/movimiento', async (req, res) => {
       return res.status(403).json({ error: 'No tenés permiso para registrar movimientos en esta caja' });
     }
 
-    const result = await db.query(
-      'INSERT INTO movimientos_caja (id_caja, tipo, monto, descripcion, comercio_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [id_caja, tipo, monto, descripcion, comercioId]
-    );
+    let result;
+    try {
+      result = await db.query(
+        'INSERT INTO movimientos_caja (id_caja, tipo, monto, descripcion, comercio_id, metodo_pago) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+        [id_caja, tipo, montoVal, descripcion.trim(), comercioId, metodoFinal]
+      );
+    } catch (eCol) {
+      result = await db.query(
+        'INSERT INTO movimientos_caja (id_caja, tipo, monto, descripcion, comercio_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [id_caja, tipo, montoVal, descripcion.trim(), comercioId]
+      );
+    }
 
     res.status(201).json({ mensaje: 'Movimiento registrado', id_movimiento: result.rows[0].id });
   } catch (error) {
@@ -124,7 +171,11 @@ router.post('/:id_caja/movimiento', async (req, res) => {
 
 router.get('/:id_caja/movimientos', async (req, res) => {
   const { id_caja } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: sesión inválida' });
+  }
 
   try {
     const result = await db.query(
@@ -141,19 +192,31 @@ router.get('/:id_caja/movimientos', async (req, res) => {
 router.post('/:id_caja/cerrar', async (req, res) => {
   const { monto_final } = req.body;
   const { id_caja } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const usuarioId = req.usuario?.id;
   const rolUsuario = req.usuario?.rol;
 
-  if (monto_final == null) {
-    return res.status(400).json({ error: 'Monto final obligatorio' });
+  if (!comercioId || !usuarioId) {
+    return res.status(401).json({ error: 'No autorizado: sesión inválida' });
+  }
+
+  if (monto_final == null || isNaN(Number(monto_final))) {
+    return res.status(400).json({ error: 'Monto final obligatorio y numérico' });
   }
 
   try {
-    const cajaRes = await db.query('SELECT monto_inicial, id_usuario FROM cajas WHERE id = $1 AND comercio_id = $2', [id_caja, comercioId]);
-    if (cajaRes.rowCount === 0) return res.status(404).json({ error: 'Caja no encontrada para este comercio' });
+    const cajaRes = await db.query(
+      'SELECT monto_inicial, id_usuario, estado FROM cajas WHERE id = $1 AND comercio_id = $2',
+      [id_caja, comercioId]
+    );
+    if (cajaRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Caja no encontrada para este comercio' });
+    }
 
-    // BUG-15 FIX: Solo el dueño de la caja o un admin puede cerrarla
+    if (cajaRes.rows[0].estado === 'cerrada') {
+      return res.status(400).json({ error: 'Esta caja ya se encuentra cerrada' });
+    }
+
     const esAdmin = ['administrador', 'dueno', 'superadmin'].includes(rolUsuario);
     const esDuenoCaja = cajaRes.rows[0].id_usuario === usuarioId;
 
@@ -161,34 +224,54 @@ router.post('/:id_caja/cerrar', async (req, res) => {
       return res.status(403).json({ error: 'No tenés permiso para cerrar esta caja' });
     }
 
-    const montoInicial = parseFloat(cajaRes.rows[0].monto_inicial);
+    // C2: Toda la matemática en centavos enteros
+    const montoInicialCents = cents(cajaRes.rows[0].monto_inicial);
 
-    const movRes = await db.query('SELECT tipo, monto FROM movimientos_caja WHERE id_caja = $1 AND comercio_id = $2', [id_caja, comercioId]);
-    let ingresos = 0;
-    let egresos = 0;
+    // C3: Solo sumar movimientos de EFECTIVO para el arqueo teórico físico de caja
+    const movRes = await db.query(
+      "SELECT tipo, monto, COALESCE(metodo_pago, 'efectivo') AS metodo_pago FROM movimientos_caja WHERE id_caja = $1 AND comercio_id = $2",
+      [id_caja, comercioId]
+    );
+
+    let ingresosEfectivoCents = 0;
+    let egresosEfectivoCents = 0;
+
     for (const mov of movRes.rows) {
-      if (mov.tipo === 'ingreso') ingresos += parseFloat(mov.monto);
-      if (mov.tipo === 'egreso') egresos += parseFloat(mov.monto);
+      if (mov.metodo_pago === 'efectivo') {
+        const mCents = cents(mov.monto);
+        if (mov.tipo === 'ingreso') {
+          ingresosEfectivoCents += mCents;
+        } else if (mov.tipo === 'egreso') {
+          egresosEfectivoCents += mCents;
+        }
+      }
     }
-    const montoTeorico = montoInicial + ingresos - egresos;
-    const diferencia = parseFloat(monto_final) - montoTeorico;
 
-    const result = await db.query(
-      'UPDATE cajas SET estado = $1, monto_final = $2, monto_teorico = $3, diferencia = $4, fecha_cierre = NOW() WHERE id = $5 AND comercio_id = $6 RETURNING id',
-      ['cerrada', monto_final, montoTeorico, diferencia, id_caja, comercioId]
+    const montoTeoricoCents = montoInicialCents + ingresosEfectivoCents - egresosEfectivoCents;
+    const montoFinalCents = cents(monto_final);
+    const diferenciaCents = montoFinalCents - montoTeoricoCents;
+
+    const montoTeorico = fromCents(montoTeoricoCents);
+    const diferencia = fromCents(diferenciaCents);
+    const montoFinalVal = fromCents(montoFinalCents);
+
+    await db.query(
+      'UPDATE cajas SET estado = $1, monto_final = $2, monto_teorico = $3, diferencia = $4, fecha_cierre = NOW() WHERE id = $5 AND comercio_id = $6',
+      ['cerrada', montoFinalVal, montoTeorico, diferencia, id_caja, comercioId]
     );
 
     await registrarAuditoria({
       tipo_evento: 'CAJA_CIERRE',
-      descripcion: `Se cerró la caja (Monto final: $${monto_final}, Diferencia: $${diferencia})`,
-      usuario_id: req.usuario?.id,
+      descripcion: `Se cerró la caja (Monto final: $${montoFinalVal}, Teórico efectivo: $${montoTeorico}, Diferencia: $${diferencia})`,
+      usuario_id: usuarioId,
       comercio_id: comercioId
     });
 
-    res.json({ 
-      mensaje: 'Caja cerrada exitosamente', 
-      monto_teorico: montoTeorico, 
-      diferencia: diferencia 
+    res.json({
+      mensaje: 'Caja cerrada exitosamente',
+      monto_teorico: montoTeorico,
+      monto_final: montoFinalVal,
+      diferencia: diferencia
     });
   } catch (error) {
     console.error('Error al cerrar caja:', error);
