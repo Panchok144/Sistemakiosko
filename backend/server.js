@@ -110,7 +110,15 @@ app.use('/api/notas', authMiddleware, rutasNotas);
 app.use('/api/licencias', authMiddleware, rutasLicencias);
 app.use('/api/backup', authMiddleware, rutasBackup);
 app.use('/api/alertas', authMiddleware, rutasAlertas);
-app.use('/api/demo', authMiddleware, rutasDemo);
+
+const demoAuthGuard = (req, res, next) => {
+  if (req.path === '/login-demo' || req.path === '/acceso-demo') {
+    return next();
+  }
+  return authMiddleware(req, res, next);
+};
+
+app.use('/api/demo', demoAuthGuard, rutasDemo);
 
 
 app.get('/health', (req, res) => {

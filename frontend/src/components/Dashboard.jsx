@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 import apiClient from '../apiClient';
 import Swal from 'sweetalert2';
 import { formatCurrency, formatTime, formatRelative } from '../utils/formatters';
+import OnboardingModal from './OnboardingModal';
 
 // ── Opciones de meses ────────────────────────────────────────────────────────
 const generarOpcionesMeses = () => {
@@ -37,7 +38,7 @@ const MODULOS_RAPIDOS = [
   { name: 'Inventario & Stock', desc: 'Catálogo, stock y precios',      path: '/inventario',      icon: Package,      color: 'bg-blue-600',    accentHex: '#2563eb', badgeKey: 'stock_bajo' },
   { name: 'Clientes',           desc: 'Cartera y cuentas corrientes',   path: '/clientes',        icon: Users,        color: 'bg-teal-600',    accentHex: '#0d9488', badgeKey: null },
   { name: 'Cuenta Corriente',   desc: 'Saldos pendientes y cobros',     path: '/cuenta-corriente',icon: CreditCard,   color: 'bg-violet-600',  accentHex: '#7c3aed', badgeKey: 'deuda_cc' },
-  { name: 'Facturas de Compra', desc: 'Ingreso de mercadería',          path: '/facturas-compra', icon: ShoppingBag,  color: 'bg-sky-600',     accentHex: '#0284c7', badgeKey: null },
+  { name: 'Facturación & CAE',  desc: 'Comprobantes y estado AFIP',     path: '/historial',       icon: ShoppingBag,  color: 'bg-sky-600',     accentHex: '#0284c7', badgeKey: 'facturas_pendientes_cae' },
   { name: 'Gastos Operativos',  desc: 'Control y registro de egresos',  path: '/gastos',          icon: TrendingDown, color: 'bg-rose-600',    accentHex: '#e11d48', badgeKey: null },
   { name: 'Reportes & Analytics',desc:'Rentabilidad y métricas',         path: '/reportes',        icon: BarChart3,    color: 'bg-emerald-600', accentHex: '#059669', badgeKey: null },
   { name: 'Presupuestos',       desc: 'Cotizaciones comerciales',       path: '/presupuestos',    icon: FileSpreadsheet, color: 'bg-cyan-600', accentHex: '#0891b2', badgeKey: null },
@@ -171,6 +172,19 @@ function ModuleBadge({ badgeKey, badges, accentHex }) {
     );
   }
 
+  if (badgeKey === 'facturas_pendientes_cae') {
+    const count = badges.facturas_pendientes_cae || 0;
+    if (count <= 0) return null;
+    return (
+      <span
+        className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[8px] font-black shadow-md whitespace-nowrap animate-pulse"
+        style={{ background: '#f59e0b25', border: '1px solid #f59e0b', color: '#f59e0b' }}
+      >
+        ● {count} CAE
+      </span>
+    );
+  }
+
   return null;
 }
 
@@ -186,8 +200,17 @@ export default function Dashboard({ historial = [], productos = [], clientes = [
   const [loadingKpis, setLoadingKpis] = useState(true);
   const [alertasResumen, setAlertasResumen] = useState(null);
   const [productosReponer, setProductosReponer] = useState([]);
+  const [mostrarOnboarding, setMostrarOnboarding] = useState(false);
 
   const prods = Array.isArray(productos) ? productos : [];
+
+  // Disparar asistente de onboarding si no hay productos en el catálogo
+  useEffect(() => {
+    if (prods.length === 0 && !loadingKpis && localStorage.getItem('kiosko_onboarding_dismissed') !== 'true') {
+      const timer = setTimeout(() => setMostrarOnboarding(true), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [prods.length, loadingKpis]);
 
   // ── Cargar KPIs del día ──────────────────────────────────────────────────
   const cargarKpisHoy = useCallback(async () => {
@@ -786,6 +809,18 @@ export default function Dashboard({ historial = [], productos = [], clientes = [
           )}
         </div>
       )}
+
+      {/* ── Asistente de Primera Configuración (Onboarding) ── */}
+      <OnboardingModal
+        isOpen={mostrarOnboarding}
+        onClose={() => setMostrarOnboarding(false)}
+        onComplete={() => {
+          cargarKpisHoy();
+          cargarAlertas();
+          setMostrarOnboarding(false);
+          if (onNavigate) onNavigate('/inventario');
+        }}
+      />
     </div>
   );
 }

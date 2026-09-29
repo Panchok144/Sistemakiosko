@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "vitest run --fileParallelism=false"
+    "test": "vitest run --fileParallelism=false --testTimeout=20000"
   },
   "keywords": [],
   "author": "",

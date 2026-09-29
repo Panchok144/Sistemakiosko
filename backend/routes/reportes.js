@@ -426,6 +426,7 @@ router.get('/dashboard-hoy', async (req, res, next) => {
       stockCriticoRes,
       sparklineRes,
       deudaCCRes,
+      facturasCaeRes,
     ] = await Promise.all([
       // 1. Ventas de hoy (totales + por método de pago)
       db.query(
@@ -511,11 +512,19 @@ router.get('/dashboard-hoy', async (req, res, next) => {
 
       // 7. Deuda total en cuenta corriente (badge CC)
       db.query(
-        `SELECT COALESCE(SUM(saldo_pendiente), 0) AS total_deuda
+        `SELECT COALESCE(SUM(saldo_deuda), 0) AS total_deuda
          FROM clientes
-         WHERE comercio_id = $1 AND saldo_pendiente > 0`,
+         WHERE comercio_id = $1 AND saldo_deuda > 0`,
         [comercioId]
       ).catch(() => ({ rows: [{ total_deuda: 0 }] })),
+
+      // 8. Facturas pendientes de CAE (badge Facturación)
+      db.query(
+        `SELECT COUNT(*) AS total
+         FROM ventas
+         WHERE comercio_id = $1 AND estado_factura = 'pendiente_cae'`,
+        [comercioId]
+      ).catch(() => ({ rows: [{ total: 0 }] })),
     ]);
 
     const hoyRow = ventasHoyRes.rows[0];
@@ -546,6 +555,7 @@ router.get('/dashboard-hoy', async (req, res, next) => {
     const cajaAbierta = cajaActualRes.rows[0] || null;
     const stockBajoCount = parseInt(stockCriticoRes.rows[0]?.total || 0);
     const deudaTotal = parseFloat(deudaCCRes.rows[0]?.total_deuda || 0);
+    const facturasPendientesCaeCount = parseInt(facturasCaeRes.rows[0]?.total || 0);
 
     res.json({
       fecha: hoyStr,
@@ -575,6 +585,7 @@ router.get('/dashboard-hoy', async (req, res, next) => {
         caja_abierta: cajaAbierta
           ? { abierta: true, desde: cajaAbierta.fecha_apertura, usuario: cajaAbierta.nombre_usuario }
           : { abierta: false },
+        facturas_pendientes_cae: facturasPendientesCaeCount,
       },
       // ── NUEVO: sparklines de los últimos 7 días ────────────────────────
       sparklines_7dias,

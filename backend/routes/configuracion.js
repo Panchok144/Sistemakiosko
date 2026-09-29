@@ -58,7 +58,7 @@ router.put('/', autorizarRoles('administrador', 'dueno'), async (req, res) => {
     return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
   }
   const {
-    razon_social, cuit, domicilio, condicion_fiscal,
+    nombre, razon_social, cuit, domicilio, condicion_fiscal,
     punto_venta, email, telefono, leyenda_ticket,
     params = {},
   } = req.body;
@@ -68,16 +68,17 @@ router.put('/', autorizarRoles('administrador', 'dueno'), async (req, res) => {
       // Actualizar datos del comercio
       await client.query(
         `UPDATE comercios SET
-          razon_social = COALESCE($1, razon_social),
-          cuit = COALESCE($2, cuit),
-          domicilio = COALESCE($3, domicilio),
-          condicion_fiscal = COALESCE($4, condicion_fiscal),
-          punto_venta = COALESCE($5, punto_venta),
-          email = COALESCE($6, email),
-          telefono = COALESCE($7, telefono),
-          leyenda_ticket = COALESCE($8, leyenda_ticket)
-        WHERE id = $9`,
-        [razon_social, cuit, domicilio, condicion_fiscal, punto_venta, email, telefono, leyenda_ticket, comercioId]
+          nombre = COALESCE($1, nombre),
+          razon_social = COALESCE($2, razon_social),
+          cuit = COALESCE($3, cuit),
+          domicilio = COALESCE($4, domicilio),
+          condicion_fiscal = COALESCE($5, condicion_fiscal),
+          punto_venta = COALESCE($6, punto_venta),
+          email = COALESCE($7, email),
+          telefono = COALESCE($8, telefono),
+          leyenda_ticket = COALESCE($9, leyenda_ticket)
+        WHERE id = $10`,
+        [nombre, razon_social, cuit, domicilio, condicion_fiscal, punto_venta, email, telefono, leyenda_ticket, comercioId]
       );
 
       // Upsert de cada parámetro clave/valor

@@ -8,8 +8,12 @@
 
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { pool } = require('../db/pgConexion');
 const { autorizarRoles } = require('../middleware/auth');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'kiosko_super_secret_jwt_key_2026';
 
 // ── Helper utilidades ────────────────────────────────────────────────────────
 function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -35,55 +39,43 @@ function randomTimeInDay(date) {
   return d;
 }
 
+// ── Helper: Limpiar tablas con Savepoints seguros ───────────────────────────
+async function limpiarTablasComercio(comercioId, client) {
+  const safeDeleteQueries = [
+    `DELETE FROM ventas_pagos WHERE comercio_id = $1`,
+    `DELETE FROM movimientos_stock WHERE comercio_id = $1`,
+    `DELETE FROM detalle_ventas WHERE comercio_id = $1`,
+    `DELETE FROM devoluciones WHERE comercio_id = $1`,
+    `DELETE FROM ventas WHERE comercio_id = $1`,
+    `DELETE FROM movimientos_cuenta_corriente WHERE comercio_id = $1`,
+    `DELETE FROM movimientos_caja WHERE comercio_id = $1`,
+    `DELETE FROM cajas WHERE comercio_id = $1`,
+    `DELETE FROM gastos WHERE comercio_id = $1`,
+    `DELETE FROM categorias_gasto WHERE comercio_id = $1`,
+    `DELETE FROM productos WHERE comercio_id = $1`,
+    `DELETE FROM proveedores WHERE comercio_id = $1`,
+    `DELETE FROM clientes WHERE comercio_id = $1`,
+    `DELETE FROM rubros WHERE comercio_id = $1`,
+  ];
+
+  for (const q of safeDeleteQueries) {
+    await client.query(`SAVEPOINT sp_del`);
+    try {
+      await client.query(q, [comercioId]);
+      await client.query(`RELEASE SAVEPOINT sp_del`);
+    } catch {
+      await client.query(`ROLLBACK TO SAVEPOINT sp_del`);
+    }
+  }
+}
+
 // ── POST /api/demo/limpiar — Borrar datos de negocio ────────────────────────
 router.post('/limpiar', autorizarRoles('administrador', 'dueno'), async (req, res) => {
   const comercioId = req.usuario?.comercio_id || 1;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    // Tablas a limpiar en orden (respetando FKs) — SIN tocar usuarios, comercios, licencias, configuracion
-    const tablas = [
-      'auditoria',
-      'historial_precios',
-      'recibos',
-      'remito_items',
-      'remitos',
-      'devolucion_items',
-      'devoluciones',
-      'notas_credito_debito_items',
-      'notas_credito_debito',
-      'facturas_compra_items',
-      'facturas_compra',
-      'gastos',
-      'categorias_gasto',
-      'presupuesto_items',
-      'presupuestos',
-      'ordenes_compra_items',
-      'ordenes_compra',
-      'movimientos_cuenta_corriente',
-      'detalle_ventas',
-      'ventas',
-      'movimientos_caja',
-      'cajas',
-      'precios_volumen',
-      'productos_listas_precios',
-      'listas_precios',
-      'productos',
-      'rubros',
-      'proveedores',
-      'clientes',
-      'secuencias_facturacion',
-    ];
-
-    for (const tabla of tablas) {
-      try {
-        await client.query(`DELETE FROM ${tabla} WHERE comercio_id = $1`, [comercioId]);
-      } catch {
-        try { await client.query(`DELETE FROM ${tabla}`); } catch { /* tabla inexistente */ }
-      }
-    }
-
+    await limpiarTablasComercio(comercioId, client);
     await client.query('COMMIT');
     res.json({ ok: true, mensaje: 'Datos de demostración eliminados correctamente.' });
   } catch (err) {
@@ -95,30 +87,10 @@ router.post('/limpiar', autorizarRoles('administrador', 'dueno'), async (req, re
   }
 });
 
-// ── POST /api/demo/seed — Cargar datos demo completos ───────────────────────
-router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // 1. Limpiar datos existentes (mismo proceso que /limpiar)
-    const tablas = [
-      'auditoria', 'historial_precios', 'recibos', 'remito_items', 'remitos',
-      'devolucion_items', 'devoluciones', 'notas_credito_debito_items', 'notas_credito_debito',
-      'facturas_compra_items', 'facturas_compra', 'gastos', 'categorias_gasto',
-      'presupuesto_items', 'presupuestos', 'ordenes_compra_items', 'ordenes_compra',
-      'movimientos_cuenta_corriente', 'detalle_ventas', 'ventas', 'movimientos_caja',
-      'cajas', 'precios_volumen', 'productos_listas_precios', 'listas_precios',
-      'productos', 'rubros', 'proveedores', 'clientes', 'secuencias_facturacion',
-    ];
-    for (const tabla of tablas) {
-      try {
-        await client.query(`DELETE FROM ${tabla} WHERE comercio_id = $1`, [comercioId]);
-      } catch {
-        try { await client.query(`DELETE FROM ${tabla}`); } catch { /* tabla inexistente */ }
-      }
-    }
+// ── Helper: Carga interna de datos demo ──────────────────────────────────────
+async function seedDatosDemo(comercioId, client) {
+    // 1. Limpiar datos existentes
+    await limpiarTablasComercio(comercioId, client);
 
     // 2. Datos del comercio demo
     await client.query(`
@@ -187,8 +159,8 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
     const clienteIds = [];
     for (const c of clientesData) {
       const r = await client.query(
-        `INSERT INTO clientes (nombre, documento, condicion_fiscal, limite_credito, saldo_pendiente, comercio_id)
-         VALUES ($1,$2,$3,$4,0,$5) RETURNING id`,
+        `INSERT INTO clientes (nombre, documento, condicion_fiscal, credito_limite, saldo_deuda, tiene_cuenta_corriente, comercio_id)
+         VALUES ($1,$2,$3,$4,0,true,$5) RETURNING id`,
         [c.nombre, c.documento, c.condicion_fiscal, c.limite_credito, comercioId]
       );
       clienteIds.push(r.rows[0].id);
@@ -258,19 +230,25 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
       { nombre: 'Pepsi 1.5L',          rubro: 'Bebidas & Gaseosas',      marca: 'Pepsi',   costo: 1050, precio_venta: 1650, stock: 20, stock_minimo: 6, codigo_barras: '7790040141001', proveedor_idx: 1 },
     ];
 
-    const productoIds = [];
-    for (const p of productosData) {
-      const r = await client.query(
-        `INSERT INTO productos
-           (nombre, codigo_barras, rubro, marca, costo, precio_venta, stock, stock_minimo, proveedor_id, comercio_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         ON CONFLICT (codigo_barras, comercio_id) DO NOTHING
-         RETURNING id`,
-        [p.nombre, p.codigo_barras, p.rubro, p.marca, p.costo, p.precio_venta, p.stock, p.stock_minimo,
-         provIds[p.proveedor_idx] || null, comercioId]
+    const prodValues = [];
+    const prodParams = [];
+    productosData.forEach((p, idx) => {
+      const base = idx * 10;
+      prodValues.push(`($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, $${base+8}, $${base+9}, $${base+10})`);
+      prodParams.push(
+        p.nombre, p.codigo_barras, p.rubro, p.marca, p.costo, p.precio_venta,
+        p.stock, p.stock_minimo, provIds[p.proveedor_idx] || null, comercioId
       );
-      if (r.rows[0]) productoIds.push({ id: r.rows[0].id, ...p });
-    }
+    });
+
+    const prodsRes = await client.query(
+      `INSERT INTO productos
+         (nombre, codigo_barras, rubro, marca, costo, precio_venta, stock, stock_minimo, proveedor_id, comercio_id)
+       VALUES ${prodValues.join(', ')}
+       RETURNING id, nombre, precio_venta, costo`,
+      prodParams
+    );
+    const productoIds = prodsRes.rows;
 
     // 7. Obtener usuario admin para las ventas
     const adminRes = await client.query(
@@ -289,20 +267,15 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
 
     // 9. Generar ventas de los últimos 30 días
     const METODOS = ['efectivo', 'efectivo', 'efectivo', 'tarjeta', 'transferencia', 'qr'];
-    const TIPOS_COMP = ['interno', 'interno', 'interno', 'interno', 'ticket_a'];
+    const TIPOS_COMP = ['interno', 'interno', 'interno', 'interno', 'factura_b'];
 
     const ventasPorDia = [];
     for (let i = 29; i >= 0; i--) {
       const fecha = new Date();
       fecha.setDate(fecha.getDate() - i);
       const esFinDeSemana = fecha.getDay() === 0 || fecha.getDay() === 6;
-      const esFinDeMes = fecha.getDate() >= 28;
-      const esQuincena = fecha.getDate() === 15 || fecha.getDate() === 16;
-      let cantVentas = esFinDeSemana ? rand(45, 70) : rand(25, 50);
-      if (esFinDeMes) cantVentas = Math.floor(cantVentas * 1.30);
-      if (esQuincena) cantVentas = Math.floor(cantVentas * 1.20);
-      // Hoy solo poner algunas ventas
-      if (i === 0) cantVentas = rand(8, 18);
+      let cantVentas = esFinDeSemana ? 2 : 1;
+      if (i === 0) cantVentas = 2;
       ventasPorDia.push({ fecha, cantVentas });
     }
 
@@ -311,8 +284,8 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
         const fechaVenta = randomTimeInDay(fecha);
         const metodo = pick(METODOS);
         const tipo = pick(TIPOS_COMP);
-        // Carrito: entre 1 y 5 items por venta
-        const nItems = rand(1, 5);
+        // Carrito: entre 1 y 4 items por venta
+        const nItems = rand(1, 4);
         const items = [];
         let total = 0;
         const usados = new Set();
@@ -320,7 +293,7 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
           const prod = pick(productoIds.filter(p => !usados.has(p.id)));
           if (!prod) break;
           usados.add(prod.id);
-          const cantidad = rand(1, 4);
+          const cantidad = rand(1, 3);
           const precio = prod.precio_venta * (1 + randF(-0.05, 0.05)); // pequeña variación histórica
           items.push({ prod, cantidad, precio });
           total += cantidad * precio;
@@ -341,11 +314,17 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
            fechaVenta]
         );
         const ventaId = ventaRes.rows[0].id;
-        for (const item of items) {
+        if (items.length > 0) {
+          const valuesClause = items
+            .map((_, idx) => `($${idx * 5 + 1}, $${idx * 5 + 2}, $${idx * 5 + 3}, $${idx * 5 + 4}, $${idx * 5 + 5})`)
+            .join(', ');
+          const params = [];
+          for (const item of items) {
+            params.push(ventaId, item.prod.id, item.cantidad, Math.round(item.precio * 100) / 100, comercioId);
+          }
           await client.query(
-            `INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario)
-             VALUES ($1,$2,$3,$4)`,
-            [ventaId, item.prod.id, item.cantidad, Math.round(item.precio * 100) / 100]
+            `INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, comercio_id) VALUES ${valuesClause}`,
+            params
           );
         }
       }
@@ -385,33 +364,111 @@ router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) 
 
     // 11. Cuentas corrientes demo (algunos clientes con saldo)
     await client.query(
-      `UPDATE clientes SET saldo_pendiente = 85000 WHERE id = $1 AND comercio_id = $2`,
+      `UPDATE clientes SET saldo_deuda = 85000 WHERE id = $1 AND comercio_id = $2`,
       [clienteIds[3], comercioId]
     ).catch(() => {});
     await client.query(
-      `UPDATE clientes SET saldo_pendiente = 42000 WHERE id = $1 AND comercio_id = $2`,
+      `UPDATE clientes SET saldo_deuda = 42000 WHERE id = $1 AND comercio_id = $2`,
       [clienteIds[4], comercioId]
     ).catch(() => {});
     await client.query(
-      `UPDATE clientes SET saldo_pendiente = 15500 WHERE id = $1 AND comercio_id = $2`,
+      `UPDATE clientes SET saldo_deuda = 15500 WHERE id = $1 AND comercio_id = $2`,
       [clienteIds[5] || clienteIds[1], comercioId]
     ).catch(() => {});
 
+    return {
+      productos: productoIds.length,
+      proveedores: provIds.length,
+      clientes: clienteIds.length,
+      dias_ventas: 30,
+    };
+}
+
+// ── POST /api/demo/seed — Cargar datos demo completos ───────────────────────
+router.post('/seed', autorizarRoles('administrador', 'dueno'), async (req, res) => {
+  const comercioId = req.usuario?.comercio_id || 1;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const stats = await seedDatosDemo(comercioId, client);
     await client.query('COMMIT');
     res.json({
       ok: true,
-      mensaje: `Datos demo cargados: ${productoIds.length} productos, 30 días de ventas, clientes y gastos.`,
-      stats: {
-        productos: productoIds.length,
-        proveedores: provIds.length,
-        clientes: clienteIds.length,
-        dias_ventas: 30,
-      },
+      mensaje: `Datos demo cargados: ${stats.productos} productos, 30 días de ventas, clientes y gastos.`,
+      stats,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch {}
     console.error('[DEMO] Error al cargar datos demo:', err);
     res.status(500).json({ error: 'Error al cargar datos demo', detalle: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ── POST /api/demo/login-demo — Acceso instantáneo en modo demo con datos reales
+router.post('/login-demo', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      INSERT INTO comercios (id, nombre, suscripcion_activa, activo_hasta)
+      VALUES (1, 'Maxikiosco Central 24hs', true, '2099-12-31')
+      ON CONFLICT (id) DO UPDATE SET
+        suscripcion_activa = true,
+        activo_hasta = '2099-12-31'
+    `);
+
+    let adminUser = (await client.query(
+      `SELECT id, nombre_usuario, rol, comercio_id, suscripcion_activa 
+       FROM usuarios 
+       WHERE (nombre_usuario = 'admin' OR rol IN ('dueno', 'administrador')) AND comercio_id = 1 
+       LIMIT 1`
+    )).rows[0];
+
+    if (!adminUser) {
+      const hash = await bcrypt.hash('admin123', 10);
+      const nuevo = await client.query(
+        `INSERT INTO usuarios (nombre_usuario, password, rol, comercio_id, suscripcion_activa)
+         VALUES ('admin', $1, 'dueno', 1, true)
+         RETURNING id, nombre_usuario, rol, comercio_id, suscripcion_activa`,
+        [hash]
+      );
+      adminUser = nuevo.rows[0];
+    }
+
+    const prodsCountRes = await client.query('SELECT COUNT(*) AS total FROM productos WHERE comercio_id = 1');
+    const prodsCount = parseInt(prodsCountRes.rows[0]?.total || 0);
+
+    let seedStats = null;
+    if (prodsCount === 0 || req.body?.forzar_seed === true) {
+      await client.query('BEGIN');
+      seedStats = await seedDatosDemo(1, client);
+      await client.query('COMMIT');
+    }
+
+    const token = jwt.sign(
+      { id: adminUser.id, rol: adminUser.rol, comercio_id: adminUser.comercio_id },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({
+      ok: true,
+      mensaje: 'Acceso demo exitoso',
+      token,
+      usuario: {
+        id: adminUser.id,
+        nombre_usuario: adminUser.nombre_usuario,
+        rol: adminUser.rol,
+        comercio_id: adminUser.comercio_id,
+        suscripcion_activa: true,
+      },
+      stats: seedStats,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[DEMO LOGIN] Error:', err);
+    res.status(500).json({ error: 'Error al iniciar sesión de demostración', detalle: err.message });
   } finally {
     client.release();
   }

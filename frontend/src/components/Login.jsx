@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import Swal from 'sweetalert2'
 import { useAuth } from '../context/AuthContext.jsx'
-import { Zap, ArrowRight, ShieldCheck, Package, BarChart3, Users } from 'lucide-react'
+import { Zap, ArrowRight, ShieldCheck, Package, BarChart3, Users, Sparkles, Loader2 } from 'lucide-react'
+import apiClient from '../apiClient'
 
 export default function Login() {
   const { login } = useAuth()
   const [usuarioInput, setUsuarioInput] = useState('')
   const [passwordInput, setPasswordInput] = useState('')
   const [cargando, setCargando] = useState(false)
+  const [cargandoDemo, setCargandoDemo] = useState(false)
 
   const manejarLogin = async (e) => {
     e.preventDefault()
@@ -23,6 +25,36 @@ export default function Login() {
       setCargando(false)
     }
   }
+
+  const manejarAccesoDemo = async () => {
+    const result = await Swal.fire({
+      title: '¿Explorar con datos demo?',
+      text: 'Se iniciará sesión con un entorno listo: catálogo completo de kiosco, ventas recientes, caja abierta y cuentas corrientes para probar todas las funciones.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Sí, cargar demo e ingresar',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#7c3aed',
+      background: '#160b30',
+      color: '#f8fafc',
+    });
+
+    if (!result.isConfirmed) return;
+
+    setCargandoDemo(true);
+    try {
+      const { data } = await apiClient.post('/api/demo/login-demo');
+      if (data.token && data.usuario) {
+        localStorage.setItem('kiosko_token', data.token);
+        localStorage.setItem('kiosko_session', JSON.stringify(data.usuario));
+        window.location.href = '/';
+      }
+    } catch (error) {
+      Swal.fire('Error', error.response?.data?.error || 'No se pudo iniciar el modo demostración', 'error');
+    } finally {
+      setCargandoDemo(false);
+    }
+  };
 
   const features = [
     { icon: Package,  label: 'Inventario & Stock en tiempo real' },
@@ -218,6 +250,39 @@ export default function Login() {
                   <>
                     Ingresar al Sistema
                     <ArrowRight size={16} />
+                  </>
+                )}
+              </button>
+
+              {/* Separador */}
+              <div className="relative my-4 flex items-center justify-center">
+                <div className="w-full border-t border-violet-800/30" />
+                <span className="absolute bg-[#160b30] px-3 text-[10px] font-bold uppercase tracking-widest text-violet-400/60">
+                  o probar el sistema
+                </span>
+              </div>
+
+              {/* Botón Cargar Datos Demo */}
+              <button
+                type="button"
+                onClick={manejarAccesoDemo}
+                disabled={cargando || cargandoDemo}
+                className="w-full rounded-xl px-5 py-3 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all duration-150 active:scale-[0.98] disabled:opacity-50 hover:bg-violet-900/30"
+                style={{
+                  background: 'rgba(124,58,237,0.12)',
+                  border: '1px solid rgba(124,58,237,0.35)',
+                  boxShadow: '0 4px 16px rgba(124,58,237,0.15)',
+                }}
+              >
+                {cargandoDemo ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin text-violet-400" />
+                    <span>Cargando entorno demo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={15} className="text-violet-400" />
+                    <span>Cargar datos demo e Ingresar</span>
                   </>
                 )}
               </button>
