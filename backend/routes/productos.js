@@ -110,6 +110,86 @@ router.get('/exportar', async (req, res) => {
   }
 });
 
+// ── GET /exportar-valorizado — Inventario valorizado con márgenes y totales ───
+router.get('/exportar-valorizado', async (req, res) => {
+  const comercioId = req.usuario?.comercio_id || 1;
+
+  try {
+    const result = await db.query(
+      `SELECT p.codigo_barras, p.nombre, p.rubro, p.marca, prov.nombre AS proveedor,
+              p.stock, p.stock_minimo, p.costo, p.precio_venta
+       FROM productos p
+       LEFT JOIN proveedores prov ON p.proveedor_id = prov.id
+       WHERE p.comercio_id = $1 AND p.activo = true
+       ORDER BY p.rubro ASC, p.nombre ASC`,
+      [comercioId]
+    );
+
+    let totalStock = 0;
+    let totalCostoVal = 0;
+    let totalVentaVal = 0;
+
+    const dataFilas = result.rows.map(p => {
+      const stock = Math.max(0, Number(p.stock) || 0);
+      const costo = Number(p.costo) || 0;
+      const pvp = Number(p.precio_venta) || 0;
+      const valorCosto = Math.round(stock * costo * 100) / 100;
+      const valorVenta = Math.round(stock * pvp * 100) / 100;
+      const gananciaPotencial = Math.round((valorVenta - valorCosto) * 100) / 100;
+      const margenPct = costo > 0 ? Math.round(((pvp - costo) / costo) * 10000) / 100 : 0;
+
+      totalStock += stock;
+      totalCostoVal += valorCosto;
+      totalVentaVal += valorVenta;
+
+      return {
+        'Código de Barras': p.codigo_barras || '',
+        'Producto': p.nombre,
+        'Rubro': p.rubro || 'Sin rubro',
+        'Marca': p.marca || '',
+        'Proveedor': p.proveedor || 'Sin proveedor',
+        'Stock Actual': stock,
+        'Stock Mínimo': p.stock_minimo || 0,
+        'Costo Unitario ($)': costo,
+        'PVP ($)': pvp,
+        'Margen Bruto (%)': `${margenPct}%`,
+        'Valuación al Costo ($)': valorCosto,
+        'Valuación a la Venta ($)': valorVenta,
+        'Ganancia Potencial ($)': gananciaPotencial,
+      };
+    });
+
+    dataFilas.push({
+      'Código de Barras': 'TOTALES',
+      'Producto': `${result.rowCount} ítems activos`,
+      'Rubro': '',
+      'Marca': '',
+      'Proveedor': '',
+      'Stock Actual': totalStock,
+      'Stock Mínimo': '',
+      'Costo Unitario ($)': '',
+      'PVP ($)': '',
+      'Margen Bruto (%)': totalCostoVal > 0 ? `${Math.round(((totalVentaVal - totalCostoVal) / totalCostoVal) * 10000) / 100}%` : '0%',
+      'Valuación al Costo ($)': Math.round(totalCostoVal * 100) / 100,
+      'Valuación a la Venta ($)': Math.round(totalVentaVal * 100) / 100,
+      'Ganancia Potencial ($)': Math.round((totalVentaVal - totalCostoVal) * 100) / 100,
+    });
+
+    const ws = xlsx.utils.json_to_sheet(dataFilas);
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, 'Inventario Valorizado');
+    const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const fechaHoy = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Disposition', `attachment; filename="inventario_valorizado_${fechaHoy}.xlsx"`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+  } catch (error) {
+    console.error('Error al exportar inventario valorizado:', error);
+    res.status(500).json({ error: 'Error al exportar inventario valorizado' });
+  }
+});
+
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 
 router.post('/', async (req, res) => {

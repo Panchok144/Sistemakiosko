@@ -317,6 +317,30 @@ export default function Inventario({
     }
   };
 
+  const handleExportValorizado = async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:4000'}/api/productos/exportar-valorizado`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${localStorage.getItem('kiosko_token') || ''}` }
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al exportar inventario valorizado');
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `inventario_valorizado_${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      Swal.fire('Error', err.message, 'error');
+    }
+  };
+
   // Calcular margen automático basado en costo y precio
   const calcularMargen = (costoVal, precioVal) => {
     const c = parseFloat(costoVal);
@@ -533,6 +557,9 @@ export default function Inventario({
               </label>
               <button type="button" onClick={handleExport} className="flex items-center justify-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 px-4 py-2.5 text-sm font-bold text-emerald-700 dark:text-emerald-300 transition-all hover:bg-emerald-600 hover:text-white border border-emerald-100 dark:border-emerald-900/60">
                 <span className="text-lg">📥</span> Exportar XLS
+              </button>
+              <button type="button" onClick={handleExportValorizado} className="flex items-center justify-center gap-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 px-4 py-2.5 text-sm font-bold text-teal-700 dark:text-teal-300 transition-all hover:bg-teal-600 hover:text-white border border-teal-100 dark:border-teal-900/60" title="Exportar inventario valorizado con costos, PVP y margen de ganancia">
+                <span className="text-lg">📊</span> Inventario Valorizado
               </button>
               <button type="button" onClick={abrirAumentoMasivo} className="flex items-center justify-center gap-2 rounded-xl bg-rose-50 dark:bg-rose-950/60 px-4 py-2.5 text-sm font-bold text-rose-700 dark:text-rose-300 transition-all hover:bg-rose-600 hover:text-white border border-rose-100 dark:border-rose-900/60">
                 <span className="text-lg">📈</span> Aumento Masivo
