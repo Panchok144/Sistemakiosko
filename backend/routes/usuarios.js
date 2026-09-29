@@ -105,8 +105,11 @@ router.post('/registro', autorizarRoles('administrador', 'dueno'), async (req, r
   }
 
   try {
-    const passwordEncriptada = bcrypt.hashSync(password, 10);
-    const comercioId = req.body.comercio_id || 1;
+    const passwordEncriptada = await bcrypt.hash(password, 10);
+    const comercioId = req.usuario?.comercio_id || req.body.comercio_id;
+    if (!comercioId) {
+      return res.status(400).json({ error: 'Falta comercio_id' });
+    }
 
     const result = await db.query(
       'INSERT INTO usuarios (nombre_usuario, password, rol, suscripcion_activa, comercio_id) VALUES ($1, $2, $3, TRUE, $4) RETURNING id, nombre_usuario, rol, comercio_id',
@@ -149,7 +152,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Usuario no encontrado' });
     }
 
-    const passwordValida = bcrypt.compareSync(password, usuario.password);
+    const passwordValida = await bcrypt.compare(password, usuario.password);
     if (!passwordValida) {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
@@ -183,6 +186,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       usuario: {
         id: usuario.id,
         nombre: usuario.nombre_usuario,
+        nombre_usuario: usuario.nombre_usuario,
         rol: usuario.rol,
         comercio_id: usuario.comercio_id,
       },

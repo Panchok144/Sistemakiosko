@@ -1,26 +1,54 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
 const db = require('../db/conexion');
 const multer = require('multer');
 const xlsx = require('xlsx');
 const { registrarAuditoria } = require('../services/auditoriaService');
 
-// Multer config for file uploads in memory
-const upload = multer({ storage: multer.memoryStorage() });
+// A6: Multer con límite de 5MB y whitelist de formatos (xlsx, xls, csv)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.xlsx', '.xls', '.csv'];
+    const allowedMimes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+      'application/csv',
+      'text/plain',
+      'application/octet-stream',
+    ];
+    if (allowedExts.includes(ext) || allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      const err = new Error('Formato no permitido. Solo se aceptan archivos Excel (.xlsx, .xls) o CSV (.csv).');
+      err.status = 400;
+      cb(err);
+    }
+  },
+});
 
-// GET / — Listar todos los productos
+// GET / — Listar productos (A2: solo activos por defecto)
 router.get('/', async (req, res, next) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
+
   const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 10000;
   const offset = (page - 1) * limit;
+  const incluirInactivos = req.query.incluir_inactivos === 'true';
 
   try {
     const result = await db.query(
       `SELECT p.*, prov.nombre AS proveedor_nombre 
        FROM productos p 
        LEFT JOIN proveedores prov ON p.proveedor_id = prov.id 
-       WHERE p.comercio_id = $1 
+       WHERE p.comercio_id = $1 ${incluirInactivos ? '' : 'AND p.activo = true'}
        ORDER BY p.nombre ASC
        LIMIT $2 OFFSET $3`,
       [comercioId, limit, offset]
@@ -270,9 +298,13 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// DELETE /:id — Borrado lógico (A2: Soft delete)
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
 
   try {
     const pResult = await db.query(
@@ -282,58 +314,193 @@ router.delete('/:id', async (req, res) => {
     if (pResult.rowCount === 0) return res.status(404).json({ error: 'Producto no encontrado' });
 
     const nombreProducto = pResult.rows[0].nombre;
-    await db.query('DELETE FROM productos WHERE id = $1 AND comercio_id = $2 RETURNING id', [id, comercioId]);
+    // A2: Borrado lógico: nunca borrar fila física para preservar integridad de ventas e historial
+    await db.query(
+      'UPDATE productos SET activo = false, updated_at = NOW() WHERE id = $1 AND comercio_id = $2 RETURNING id',
+      [id, comercioId]
+    );
 
     await registrarAuditoria({
       tipo_evento: 'STOCK_ELIMINACION',
-      descripcion: `Se eliminó del stock el producto: ${nombreProducto} (ID: ${id})`,
+      descripcion: `Se desactivó (borrado lógico) el producto: ${nombreProducto} (ID: ${id})`,
       usuario_id: req.usuario?.id,
       comercio_id: comercioId
     });
 
-    res.json({ mensaje: 'Producto eliminado con éxito' });
+    res.json({ mensaje: 'Producto desactivado con éxito' });
   } catch (error) {
-    console.error('Error al eliminar producto:', error);
-    res.status(500).json({ error: 'Error al eliminar producto' });
+    console.error('Error al desactivar producto:', error);
+    res.status(500).json({ error: 'Error al desactivar producto' });
   }
 });
 
+// POST /:id/ajustar-stock — Ajuste manual de stock auditado con motivo (A1)
+router.post('/:id/ajustar-stock', async (req, res) => {
+  const { id } = req.params;
+  const comercioId = req.usuario?.comercio_id;
+  const usuarioId = req.usuario?.id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
+
+  let { cantidad, motivo, tipo } = req.body;
+  cantidad = parseInt(cantidad, 10);
+
+  if (Number.isNaN(cantidad) || cantidad === 0) {
+    return res.status(400).json({ error: 'La cantidad debe ser un número entero diferente de cero (positivo para sumar, negativo para restar).' });
+  }
+
+  if (!motivo || typeof motivo !== 'string' || !motivo.trim()) {
+    return res.status(400).json({ error: 'El motivo del ajuste de stock es obligatorio y debe ser detallado.' });
+  }
+
+  const motivoLimpio = motivo.trim();
+  const tipoAjuste = tipo || (cantidad > 0 ? 'ingreso_manual' : 'ajuste_manual');
+
+  try {
+    let stockAnterior = 0;
+    let stockNuevo = 0;
+    let nombreProd = '';
+
+    await db.transaction(async (client) => {
+      const prodRes = await client.query(
+        'SELECT id, nombre, stock FROM productos WHERE id = $1 AND comercio_id = $2 FOR UPDATE',
+        [id, comercioId]
+      );
+
+      if (prodRes.rowCount === 0) {
+        const notFoundErr = new Error('Producto no encontrado en este comercio');
+        notFoundErr.statusCode = 404;
+        throw notFoundErr;
+      }
+
+      const prod = prodRes.rows[0];
+      stockAnterior = Number(prod.stock || 0);
+      stockNuevo = stockAnterior + cantidad;
+      nombreProd = prod.nombre;
+
+      if (stockNuevo < 0) {
+        const negErr = new Error(`El ajuste resultaría en stock negativo (${stockNuevo}). Stock disponible: ${stockAnterior}, ajuste solicitado: ${cantidad}.`);
+        negErr.statusCode = 409;
+        throw negErr;
+      }
+
+      await client.query(
+        'UPDATE productos SET stock = $1, updated_at = NOW() WHERE id = $2 AND comercio_id = $3',
+        [stockNuevo, id, comercioId]
+      );
+
+      await client.query(
+        `INSERT INTO movimientos_stock 
+           (producto_id, comercio_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [id, comercioId, usuarioId, tipoAjuste, cantidad, stockAnterior, stockNuevo, motivoLimpio]
+      );
+    });
+
+    await registrarAuditoria({
+      tipo_evento: 'STOCK_AJUSTE_MANUAL',
+      descripcion: `Ajuste de stock en "${nombreProd}" (ID: ${id}): ${cantidad > 0 ? '+' : ''}${cantidad} unidades (${stockAnterior} -> ${stockNuevo}). Motivo: ${motivoLimpio}`,
+      usuario_id: usuarioId,
+      comercio_id: comercioId,
+    });
+
+    res.json({
+      mensaje: 'Ajuste de stock registrado con éxito',
+      id_producto: Number(id),
+      stock_anterior: stockAnterior,
+      stock_nuevo: stockNuevo,
+      cantidad,
+      motivo: motivoLimpio,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('Error al registrar ajuste de stock:', error);
+    res.status(500).json({ error: 'Error al registrar el ajuste de stock', detalle: error.message });
+  }
+});
+
+// PUT /:id/stock — Compatibilidad hacia atrás (ingreso rápido de stock con registro)
 router.put('/:id/stock', async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
-  let { cantidad_agregada } = req.body;
+  const comercioId = req.usuario?.comercio_id;
+  const usuarioId = req.usuario?.id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
 
+  let { cantidad_agregada, motivo } = req.body;
   cantidad_agregada = parseInt(cantidad_agregada, 10);
   if (Number.isNaN(cantidad_agregada) || cantidad_agregada <= 0) {
     return res.status(400).json({ error: 'La cantidad debe ser un número válido mayor a 0' });
   }
 
+  const motivoLimpio = (motivo && String(motivo).trim()) || 'Ingreso rápido de stock';
+
   try {
-    const result = await db.query(
-      'UPDATE productos SET stock = stock + $1, updated_at=NOW() WHERE id = $2 AND comercio_id = $3 RETURNING id',
-      [cantidad_agregada, id, comercioId]
-    );
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'El producto con ese ID no existe en este comercio' });
-    }
+    let stockAnt = 0;
+    let stockNue = 0;
+
+    await db.transaction(async (client) => {
+      const prodRes = await client.query(
+        'SELECT stock FROM productos WHERE id = $1 AND comercio_id = $2 FOR UPDATE',
+        [id, comercioId]
+      );
+      if (prodRes.rowCount === 0) {
+        const err = new Error('El producto con ese ID no existe en este comercio');
+        err.statusCode = 404;
+        throw err;
+      }
+      stockAnt = Number(prodRes.rows[0].stock || 0);
+      stockNue = stockAnt + cantidad_agregada;
+
+      await client.query(
+        'UPDATE productos SET stock = $1, updated_at = NOW() WHERE id = $2 AND comercio_id = $3',
+        [stockNue, id, comercioId]
+      );
+
+      await client.query(
+        `INSERT INTO movimientos_stock 
+           (producto_id, comercio_id, usuario_id, tipo, cantidad, stock_anterior, stock_nuevo, motivo)
+         VALUES ($1, $2, $3, 'ingreso', $4, $5, $6, $7)`,
+        [id, comercioId, usuarioId, cantidad_agregada, stockAnt, stockNue, motivoLimpio]
+      );
+    });
 
     await registrarAuditoria({
       tipo_evento: 'STOCK_RENOVACION',
       descripcion: `Se ingresaron ${cantidad_agregada} unidades al stock del producto ID: ${id}`,
-      usuario_id: req.usuario?.id,
+      usuario_id: usuarioId,
       comercio_id: comercioId
     });
 
-    res.json({ mensaje: '¡Stock ingresado correctamente!' });
+    res.json({ mensaje: '¡Stock ingresado correctamente!', stock_nuevo: stockNue });
   } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
     console.error('Error al actualizar el stock:', error);
     res.status(500).json({ error: 'Error al actualizar el stock' });
   }
 });
 
-router.post('/importar', upload.single('archivo'), async (req, res) => {
+// POST /importar — Importar productos XLS/CSV (A6: limits 5MB + reporte de rechazados)
+router.post('/importar', (req, res, next) => {
+  upload.single('archivo')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'El archivo excede el tamaño máximo permitido de 5MB.' });
+      }
+      return res.status(400).json({ error: err.message || 'Error al subir archivo' });
+    }
+    next();
+  });
+}, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo' });
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
 
   try {
     const wb = xlsx.read(req.file.buffer, { type: 'buffer' });
@@ -341,33 +508,81 @@ router.post('/importar', upload.single('archivo'), async (req, res) => {
     const data = xlsx.utils.sheet_to_json(ws);
 
     let procesados = 0;
+    const rechazados = [];
 
     await db.transaction(async (client) => {
-      for (const row of data) {
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        const numFila = i + 2; // Considerando cabecera en fila 1
+
+        if (!row.codigo_barras) {
+          rechazados.push({ fila: numFila, motivo: 'Falta código de barras' });
+          continue;
+        }
+        if (!row.nombre) {
+          rechazados.push({ fila: numFila, codigo_barras: row.codigo_barras, motivo: 'Falta nombre del producto' });
+          continue;
+        }
+
         const pVenta = parseFloat(row.precio_venta);
         const pCosto = parseFloat(row.costo);
-        if (!row.codigo_barras || !row.nombre || Number.isNaN(pVenta) || Number.isNaN(pCosto)) continue;
+        if (Number.isNaN(pVenta) || pVenta < 0) {
+          rechazados.push({ fila: numFila, codigo_barras: row.codigo_barras, motivo: 'Precio de venta inválido o menor a 0' });
+          continue;
+        }
+        if (Number.isNaN(pCosto) || pCosto < 0) {
+          rechazados.push({ fila: numFila, codigo_barras: row.codigo_barras, motivo: 'Costo inválido o menor a 0' });
+          continue;
+        }
 
-        await client.query(`
-          INSERT INTO productos (codigo_barras, nombre, precio_venta, costo, stock, rubro, marca, comercio_id) 
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          ON CONFLICT (codigo_barras, comercio_id) DO UPDATE SET 
-            nombre=EXCLUDED.nombre, 
-            precio_venta=EXCLUDED.precio_venta, 
-            costo=EXCLUDED.costo, 
-            stock=EXCLUDED.stock,
-            rubro=EXCLUDED.rubro,
-            marca=EXCLUDED.marca,
-            updated_at=NOW()
-        `, [
-          row.codigo_barras.toString(), row.nombre, pVenta, pCosto,
-          parseInt(row.stock || 0), row.rubro || null, row.marca || null, comercioId
-        ]);
+        const existingProd = await client.query(
+          'SELECT id FROM productos WHERE codigo_barras = $1 AND comercio_id = $2',
+          [row.codigo_barras.toString(), comercioId]
+        );
+
+        if (existingProd.rowCount > 0) {
+          await client.query(`
+            UPDATE productos SET 
+              nombre = $1, 
+              precio_venta = $2, 
+              costo = $3, 
+              stock = $4,
+              rubro = $5,
+              marca = $6,
+              activo = true,
+              updated_at = NOW()
+            WHERE id = $7 AND comercio_id = $8
+          `, [
+            row.nombre, pVenta, pCosto,
+            parseInt(row.stock || 0, 10), row.rubro || null, row.marca || null,
+            existingProd.rows[0].id, comercioId
+          ]);
+        } else {
+          await client.query(`
+            INSERT INTO productos (codigo_barras, nombre, precio_venta, costo, stock, rubro, marca, comercio_id, activo) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+          `, [
+            row.codigo_barras.toString(), row.nombre, pVenta, pCosto,
+            parseInt(row.stock || 0, 10), row.rubro || null, row.marca || null, comercioId
+          ]);
+        }
         procesados++;
       }
     });
 
-    res.json({ mensaje: `Importación completada. Se procesaron ${procesados} productos.` });
+    await registrarAuditoria({
+      tipo_evento: 'STOCK_IMPORTACION',
+      descripcion: `Importación masiva: ${procesados} procesados, ${rechazados.length} rechazados`,
+      usuario_id: req.usuario?.id,
+      comercio_id: comercioId,
+    });
+
+    res.json({
+      mensaje: `Importación completada. Se procesaron ${procesados} productos.${rechazados.length > 0 ? ` (${rechazados.length} filas rechazadas)` : ''}`,
+      procesados,
+      rechazados,
+      total_filas: data.length,
+    });
   } catch (error) {
     console.error('Error al importar XLS:', error);
     res.status(500).json({ error: 'Error al procesar el archivo Excel', detalle: error.message });
