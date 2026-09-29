@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, lazy, Suspense } from 'react'
 import apiClient from './apiClient.js'
 import jsPDF from 'jspdf'
 import 'jspdf-autotable'
@@ -9,26 +9,27 @@ import Layout from './components/Layout.jsx';
 import Dashboard from './components/Dashboard.jsx';
 
 import Login from './components/Login.jsx'
-import Ventas from './components/Ventas.jsx'
-import Inventario from './components/Inventario.jsx'
-import Historial from './components/Historial.jsx'
-import Proveedores from './components/Proveedores.jsx'
-import Caja from './components/Caja.jsx'
-import Clientes from './components/Clientes.jsx'
-import Remitos from './components/Remitos.jsx'
-import Recibos from './components/Recibos.jsx'
+import { guardarVentaOffline, sincronizarVentasPendientes } from './utils/offlineQueue.js';
 
-// Nuevos componentes comerciales
-import Devoluciones from './components/Devoluciones.jsx'
-import CuentaCorriente from './components/CuentaCorriente.jsx'
-import ListasPrecios from './components/ListasPrecios.jsx'
-import Presupuestos from './components/Presupuestos.jsx'
-import OrdenesCompra from './components/OrdenesCompra.jsx'
-import Reportes from './components/Reportes.jsx'
-import Configuracion from './components/Configuracion.jsx'
-import Gastos from './components/Gastos.jsx'
-import FacturasCompra from './components/FacturasCompra.jsx'
-import Licencias from './components/Licencias.jsx'
+// Módulos con Lazy Loading para optimizar performance y bundle inicial
+const Ventas = lazy(() => import('./components/Ventas.jsx'))
+const Inventario = lazy(() => import('./components/Inventario.jsx'))
+const Historial = lazy(() => import('./components/Historial.jsx'))
+const Proveedores = lazy(() => import('./components/Proveedores.jsx'))
+const Caja = lazy(() => import('./components/Caja.jsx'))
+const Clientes = lazy(() => import('./components/Clientes.jsx'))
+const Remitos = lazy(() => import('./components/Remitos.jsx'))
+const Recibos = lazy(() => import('./components/Recibos.jsx'))
+const Devoluciones = lazy(() => import('./components/Devoluciones.jsx'))
+const CuentaCorriente = lazy(() => import('./components/CuentaCorriente.jsx'))
+const ListasPrecios = lazy(() => import('./components/ListasPrecios.jsx'))
+const Presupuestos = lazy(() => import('./components/Presupuestos.jsx'))
+const OrdenesCompra = lazy(() => import('./components/OrdenesCompra.jsx'))
+const Reportes = lazy(() => import('./components/Reportes.jsx'))
+const Configuracion = lazy(() => import('./components/Configuracion.jsx'))
+const Gastos = lazy(() => import('./components/Gastos.jsx'))
+const FacturasCompra = lazy(() => import('./components/FacturasCompra.jsx'))
+const Licencias = lazy(() => import('./components/Licencias.jsx'))
 
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 
@@ -108,6 +109,18 @@ function AppContent() {
   )
 
   const totalRecaudado = historial.reduce((acc, venta) => acc + parseFloat(venta.total || 0), 0)
+
+  // Sincronización automática de ventas offline en cola al recuperar conexión
+  useEffect(() => {
+    const handleOnline = () => {
+      sincronizarVentasPendientes(apiClient).catch(() => {});
+    };
+    window.addEventListener('online', handleOnline);
+    if (token) {
+      sincronizarVentasPendientes(apiClient).catch(() => {});
+    }
+    return () => window.removeEventListener('online', handleOnline);
+  }, [token]);
 
   useEffect(() => {
     if (!authReady || !token) return
@@ -479,7 +492,11 @@ function AppContent() {
       id_usuario: user.id,
       total: totalVenta,
       descuento: descNum,
-      productos: carrito,
+      productos: carrito.map(item => ({
+        id: item.id,
+        cantidad: item.cantidad,
+        ...(item.id_lista_precios ? { id_lista_precios: item.id_lista_precios } : {})
+      })),
       tipo_comprobante: tipoComprobante,
       metodo_pago: metodoPago,
       cliente_id: clienteId || null,
@@ -490,7 +507,11 @@ function AppContent() {
       } : null,
     }
 
-    apiClient.post('/api/ventas', datosVenta)
+    const idempotencyKey = `pos-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+    apiClient.post('/api/ventas', datosVenta, {
+      headers: { 'Idempotency-Key': idempotencyKey }
+    })
       .then(({ data }) => {
         Swal.fire({
           title: '✅ Venta Confirmada!',
@@ -535,6 +556,23 @@ function AppContent() {
       .catch((error) => {
         setIsProcessingSale(false)
         console.error('Error al procesar venta:', error)
+
+        // Modo Offline: si no hubo respuesta del servidor o el dispositivo está offline
+        if (!error.response && (!navigator.onLine || error.code === 'ERR_NETWORK')) {
+          guardarVentaOffline(datosVenta, idempotencyKey);
+          Swal.fire({
+            title: '📡 Venta Guardada Offline',
+            html: 'No hay conexión con el servidor. La venta se guardó en la cola local de este dispositivo y <strong>se sincronizará automáticamente</strong> al recuperar la conexión.',
+            icon: 'info',
+            confirmButtonText: 'Entendido',
+          });
+          setCarrito([]);
+          setDescuento('0');
+          setTipoComprobante('interno');
+          setMetodoPago('efectivo');
+          return;
+        }
+
         Swal.fire('❌Error', error.response?.data?.error || error.message || 'Hubo un problema al procesar la venta.', 'error')
       })
   }
@@ -748,93 +786,111 @@ function AppContent() {
     )
   }
 
+function RouteLoadingFallback() {
+  return (
+    <div className="flex h-64 items-center justify-center font-sans">
+      <div className="flex flex-col items-center gap-3">
+        <div
+          className="h-8 w-8 rounded-full border-2 animate-spin"
+          style={{ borderColor: 'rgba(139,92,246,0.20)', borderTopColor: '#8b5cf6' }}
+        />
+        <span className="text-xs font-semibold" style={{ color: 'rgba(167,139,250,0.70)' }}>
+          Cargando módulo...
+        </span>
+      </div>
+    </div>
+  );
+}
+
   return (
     <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<DashboardWrapper historial={historial} productos={productos} clientes={clientes} />} />
-          <Route path="/ventas" element={
-            <Ventas
-              busqueda={busqueda}
-              setBusqueda={setBusqueda}
-              productosFiltrados={productosFiltrados}
-              carrito={carrito}
-              setCarrito={setCarrito}
-              agregarAlCarrito={agregarAlCarrito}
-              eliminarDelCarrito={eliminarDelCarrito}
-              finalizarVenta={finalizarVenta}
-              tipoComprobante={tipoComprobante}
-              setTipoComprobante={setTipoComprobante}
-              metodoPago={metodoPago}
-              setMetodoPago={setMetodoPago}
-              clienteNombre={clienteNombre}
-              setClienteNombre={setClienteNombre}
-              clienteDocumento={clienteDocumento}
-              setClienteDocumento={setClienteDocumento}
-              clienteId={clienteId}
-              setClienteId={setClienteId}
-              descuento={descuento}
-              setDescuento={setDescuento}
-              isProcessingSale={isProcessingSale}
-              clientes={clientes}
-              rubrosLista={rubrosLista}
-            />
-          } />
-          <Route path="/inventario" element={
-            <Inventario
-              productos={productos}
-              canManageCatalog={canManageCatalog}
-              codigoBarras={codigoBarras}
-              setCodigoBarras={setCodigoBarras}
-              nombre={nombre}
-              setNombre={setNombre}
-              precioVenta={precioVenta}
-              setPrecioVenta={setPrecioVenta}
-              costo={costo}
-              setCosto={setCosto}
-              stock={stock}
-              setStock={setStock}
-              codigoSecundario={codigoSecundario}
-              setCodigoSecundario={setCodigoSecundario}
-              codigoProveedor={codigoProveedor}
-              setCodigoProveedor={setCodigoProveedor}
-              rubro={rubro}
-              setRubro={setRubro}
-              marca={marca}
-              setMarca={setMarca}
-              proveedorId={proveedorId}
-              setProveedorId={setProveedorId}
-              proveedores={proveedores}
-              rubrosLista={rubrosLista}
-              cargarRubros={cargarRubros}
-              cargarProductos={cargarProductos}
-              manejarEnvio={manejarEnvio}
-              eliminarProducto={eliminarProducto}
-              editarProducto={editarProducto}
-              abrirAgregarStock={abrirAgregarStock}
-              abrirAumentoMasivo={() => setModalAumento(true)}
-            />
-          } />
-          <Route path="/caja" element={<Caja historial={historial} isOwner={isOwner} usuario={user} />} />
-          <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
-          <Route path="/devoluciones" element={<Devoluciones />} />
-          <Route path="/listas-precios" element={<ListasPrecios productos={productos} />} />
-          <Route path="/presupuestos" element={<Presupuestos productos={productos} clientes={clientes} />} />
-          <Route path="/ordenes-compra" element={<OrdenesCompra proveedores={proveedores} productos={productos} />} />
-          <Route path="/clientes" element={<Clientes clientes={clientes} canManageCatalog={canManageCatalog} manejarEnvioCliente={manejarEnvioCliente} eliminarCliente={eliminarCliente} editarCliente={editarCliente} cargarClientes={cargarClientes} />} />
-          <Route path="/proveedores" element={<Proveedores proveedores={proveedores} canManageCatalog={canManageCatalog} provNombre={provNombre} setProvNombre={setProvNombre} provTelefono={provTelefono} setProvTelefono={setProvTelefono} provEmail={provEmail} setProvEmail={setProvEmail} provDescripcion={provDescripcion} setProvDescripcion={setProvDescripcion} provCuit={provCuit} setProvCuit={setProvCuit} provDireccion={provDireccion} setProvDireccion={setProvDireccion} manejarEnvioProveedor={manejarEnvioProveedor} eliminarProveedor={eliminarProveedor} editarProveedor={editarProveedor} />} />
-          <Route path="/historial" element={<Historial historial={historial} canViewFinancials={canViewFinancials} totalRecaudado={totalRecaudado} verDetalleVenta={verDetalleVenta} />} />
-          <Route path="/remitos" element={<Remitos remitos={remitos} productos={productos} proveedores={proveedores} crearRemito={crearRemito} />} />
-          <Route path="/recibos" element={<Recibos recibos={recibos} proveedores={proveedores} crearRecibo={crearRecibo} />} />
-          <Route path="/reportes" element={<Reportes />} />
-          <Route path="/configuracion" element={<Configuracion canManageCatalog={canManageCatalog} />} />
-          <Route path="/gastos" element={<Gastos />} />
-          <Route path="/facturas-compra" element={<FacturasCompra productos={productos} proveedores={proveedores} />} />
-          <Route path="/licencias" element={<Licencias />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+      <Suspense fallback={<RouteLoadingFallback />}>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<DashboardWrapper historial={historial} productos={productos} clientes={clientes} />} />
+            <Route path="/ventas" element={
+              <Ventas
+                busqueda={busqueda}
+                setBusqueda={setBusqueda}
+                productosFiltrados={productosFiltrados}
+                carrito={carrito}
+                setCarrito={setCarrito}
+                agregarAlCarrito={agregarAlCarrito}
+                eliminarDelCarrito={eliminarDelCarrito}
+                finalizarVenta={finalizarVenta}
+                tipoComprobante={tipoComprobante}
+                setTipoComprobante={setTipoComprobante}
+                metodoPago={metodoPago}
+                setMetodoPago={setMetodoPago}
+                clienteNombre={clienteNombre}
+                setClienteNombre={setClienteNombre}
+                clienteDocumento={clienteDocumento}
+                setClienteDocumento={setClienteDocumento}
+                clienteId={clienteId}
+                setClienteId={setClienteId}
+                descuento={descuento}
+                setDescuento={setDescuento}
+                isProcessingSale={isProcessingSale}
+                clientes={clientes}
+                rubrosLista={rubrosLista}
+              />
+            } />
+            <Route path="/inventario" element={
+              <Inventario
+                productos={productos}
+                canManageCatalog={canManageCatalog}
+                codigoBarras={codigoBarras}
+                setCodigoBarras={setCodigoBarras}
+                nombre={nombre}
+                setNombre={setNombre}
+                precioVenta={precioVenta}
+                setPrecioVenta={setPrecioVenta}
+                costo={costo}
+                setCosto={setCosto}
+                stock={stock}
+                setStock={setStock}
+                codigoSecundario={codigoSecundario}
+                setCodigoSecundario={setCodigoSecundario}
+                codigoProveedor={codigoProveedor}
+                setCodigoProveedor={setCodigoProveedor}
+                rubro={rubro}
+                setRubro={setRubro}
+                marca={marca}
+                setMarca={setMarca}
+                proveedorId={proveedorId}
+                setProveedorId={setProveedorId}
+                proveedores={proveedores}
+                rubrosLista={rubrosLista}
+                cargarRubros={cargarRubros}
+                cargarProductos={cargarProductos}
+                manejarEnvio={manejarEnvio}
+                eliminarProducto={eliminarProducto}
+                editarProducto={editarProducto}
+                abrirAgregarStock={abrirAgregarStock}
+                abrirAumentoMasivo={() => setModalAumento(true)}
+              />
+            } />
+            <Route path="/caja" element={<Caja historial={historial} isOwner={isOwner} usuario={user} />} />
+            <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
+            <Route path="/devoluciones" element={<Devoluciones />} />
+            <Route path="/listas-precios" element={<ListasPrecios productos={productos} />} />
+            <Route path="/presupuestos" element={<Presupuestos productos={productos} clientes={clientes} />} />
+            <Route path="/ordenes-compra" element={<OrdenesCompra proveedores={proveedores} productos={productos} />} />
+            <Route path="/clientes" element={<Clientes clientes={clientes} canManageCatalog={canManageCatalog} manejarEnvioCliente={manejarEnvioCliente} eliminarCliente={eliminarCliente} editarCliente={editarCliente} cargarClientes={cargarClientes} />} />
+            <Route path="/proveedores" element={<Proveedores proveedores={proveedores} canManageCatalog={canManageCatalog} provNombre={provNombre} setProvNombre={setProvNombre} provTelefono={provTelefono} setProvTelefono={setProvTelefono} provEmail={provEmail} setProvEmail={setProvEmail} provDescripcion={provDescripcion} setProvDescripcion={setProvDescripcion} provCuit={provCuit} setProvCuit={setProvCuit} provDireccion={provDireccion} setProvDireccion={setProvDireccion} manejarEnvioProveedor={manejarEnvioProveedor} eliminarProveedor={eliminarProveedor} editarProveedor={editarProveedor} />} />
+            <Route path="/historial" element={<Historial historial={historial} canViewFinancials={canViewFinancials} totalRecaudado={totalRecaudado} verDetalleVenta={verDetalleVenta} />} />
+            <Route path="/remitos" element={<Remitos remitos={remitos} productos={productos} proveedores={proveedores} crearRemito={crearRemito} />} />
+            <Route path="/recibos" element={<Recibos recibos={recibos} proveedores={proveedores} crearRecibo={crearRecibo} />} />
+            <Route path="/reportes" element={<Reportes />} />
+            <Route path="/configuracion" element={<Configuracion canManageCatalog={canManageCatalog} />} />
+            <Route path="/gastos" element={<Gastos />} />
+            <Route path="/facturas-compra" element={<FacturasCompra productos={productos} proveedores={proveedores} />} />
+            <Route path="/licencias" element={<Licencias />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
 
-        </Route>
-      </Routes>
+          </Route>
+        </Routes>
+      </Suspense>
 
       {/* Modal Ticket Venta */}
       {ventaSeleccionada && (() => {

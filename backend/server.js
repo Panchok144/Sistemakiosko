@@ -52,7 +52,7 @@ app.use(
       return callback(new Error(`Origen no permitido por CORS: ${origin}`));
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'x-idempotency-key'],
     credentials: true,
   })
 );
@@ -76,11 +76,9 @@ app.use('/api/', limiter);
 // 4. Parser de JSON
 app.use(express.json({ limit: '500kb' }));
 
-// Logger
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
-  next();
-});
+// 5. Logger estructurado (sanitización de tokens/passwords y métricas de duración)
+const logger = require('./utils/logger');
+app.use(logger.httpLogger);
 
 const usuarioAuthGuard = (req, res, next) => {
   if (req.path === '/login') {
@@ -115,6 +113,10 @@ app.use('/api/alertas', authMiddleware, rutasAlertas);
 app.use('/api/demo', authMiddleware, rutasDemo);
 
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
 app.get('/api/saludo', authMiddleware, (req, res) => {
   res.json({ mensaje: '¡Servidor corriendo y listo para el kiosko!' });
 });
@@ -125,6 +127,10 @@ app.use((req, res) => {
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Backend listo en http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Backend listo en http://localhost:${PORT}`);
+  });
+}
+
+module.exports = app;

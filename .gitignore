@@ -31,3 +31,10 @@ Thumbs.db
 
 # ── Script temporal ─────────────────────────────────────────
 create_history.ps1
+
+# ── Test Artifacts ──────────────────────────────────────────
+test-results/
+frontend/test-results/
+playwright-report/
+frontend/playwright-report/
+

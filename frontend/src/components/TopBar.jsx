@@ -6,10 +6,12 @@ import {
   Box, ShoppingCart, Package, Users, CreditCard, FileSpreadsheet,
   RotateCcw, Briefcase, ShoppingBag, Truck, TrendingDown,
   Receipt, FileText, BarChart3, Settings, ShieldCheck, Tag,
+  Wifi, WifiOff, RefreshCw,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import apiClient from '../apiClient';
+import { obtenerVentasOffline, sincronizarVentasPendientes } from '../utils/offlineQueue';
 
 // ── Mapa de rutas a nombre legible ────────────────────────────────────────
 const ROUTE_LABELS = {
@@ -266,6 +268,84 @@ function CajaIndicator() {
   );
 }
 
+// ── Componente de estado de Conexión y Cola Offline ────────────────────────
+function SyncIndicator() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [queueCount, setQueueCount] = useState(() => obtenerVentasOffline().length);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      handleSync();
+    };
+    const handleOffline = () => setIsOnline(false);
+    const handleQueueUpdated = (e) => {
+      setQueueCount(e.detail?.count ?? obtenerVentasOffline().length);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('kiosko:offline_queue_updated', handleQueueUpdated);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('kiosko:offline_queue_updated', handleQueueUpdated);
+    };
+  }, []);
+
+  const handleSync = async () => {
+    if (syncing || queueCount === 0) return;
+    setSyncing(true);
+    try {
+      await sincronizarVentasPendientes(apiClient);
+      setQueueCount(obtenerVentasOffline().length);
+    } catch (_) {
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  if (!isOnline) {
+    return (
+      <div
+        title={`Sin conexión a internet. ${queueCount} venta(s) guardadas en cola local.`}
+        className="hidden sm:flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold"
+        style={{
+          background: 'rgba(239,68,68,0.15)',
+          border: '1px solid rgba(239,68,68,0.30)',
+          color: '#ef4444',
+        }}
+      >
+        <WifiOff size={11} />
+        <span>Offline {queueCount > 0 ? `(${queueCount})` : ''}</span>
+      </div>
+    );
+  }
+
+  if (queueCount > 0) {
+    return (
+      <button
+        onClick={handleSync}
+        disabled={syncing}
+        title="Hay ventas pendientes de sincronizar. Clic para sincronizar ahora."
+        className="hidden sm:flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-all hover:brightness-110"
+        style={{
+          background: 'rgba(245,158,11,0.15)',
+          border: '1px solid rgba(245,158,11,0.35)',
+          color: '#f59e0b',
+        }}
+      >
+        <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
+        <span>Sincronizar ({queueCount})</span>
+      </button>
+    );
+  }
+
+  return null;
+}
+
 // ── Avatar Dropdown ────────────────────────────────────────────────────────
 function UserMenu({ user, logout, theme, toggleTheme }) {
   const [open, setOpen] = useState(false);
@@ -418,6 +498,9 @@ export default function TopBar() {
 
       {/* Acciones del lado derecho */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
+        {/* Indicador de Conexión / Cola Offline */}
+        <SyncIndicator />
+
         {/* Indicador de Caja */}
         <CajaIndicator />
 
