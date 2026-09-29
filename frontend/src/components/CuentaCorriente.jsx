@@ -9,6 +9,8 @@ export default function CuentaCorriente() {
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [movimientos, setMovimientos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [resumenMora, setResumenMora] = useState(null);
+  const [filtroRiesgo, setFiltroRiesgo] = useState('todos');
 
   // Forms
   const [montoPago, setMontoPago] = useState('');
@@ -22,6 +24,9 @@ export default function CuentaCorriente() {
   const cargarClientes = () => {
     apiClient.get('/api/cuenta-corriente')
       .then(res => setClientes(res.data || []))
+      .catch(err => console.error(err));
+    apiClient.get('/api/cuenta-corriente/resumen-mora')
+      .then(res => setResumenMora(res.data || null))
       .catch(err => console.error(err));
   };
 
@@ -79,12 +84,66 @@ export default function CuentaCorriente() {
     (c.documento && c.documento.includes(busqueda))
   );
 
+  const getRiesgoInfo = (clienteId) => {
+    if (!resumenMora?.clientes) return null;
+    return resumenMora.clientes.find(c => c.id === clienteId);
+  };
+
+  const clientesConRiesgo = clientesFiltrados.filter(c => {
+    if (filtroRiesgo === 'todos') return true;
+    const info = getRiesgoInfo(c.id);
+    if (!info) return filtroRiesgo === 'al_dia';
+    if (filtroRiesgo === 'morosos') return info.riesgo === 'rojo';
+    if (filtroRiesgo === 'alerta') return info.riesgo === 'amarillo';
+    if (filtroRiesgo === 'al_dia') return info.riesgo === 'verde';
+    return true;
+  });
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Cuenta Corriente de Clientes</h1>
-        <p className="text-sm text-slate-600 dark:text-slate-300">Gestión de créditos, deudas e historial de pagos por cliente.</p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">Cuenta Corriente de Clientes</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-300">Gestión de créditos, semáforo de riesgo y cobranza de deudas.</p>
+        </div>
       </div>
+
+      {/* KPI Cards de Riesgo y Cartera */}
+      {resumenMora?.resumen && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-4 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Deuda Total a Cobrar</span>
+            <p className="mt-1 text-xl font-black text-slate-900 dark:text-slate-100">
+              ${(resumenMora.resumen.total_deuda_cobrar || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+            </p>
+            <span className="text-[11px] text-slate-500">{resumenMora.resumen.clientes_con_deuda} clientes con saldo</span>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/30 p-4 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Al Día (&lt;30 días)</span>
+            <p className="mt-1 text-xl font-black text-emerald-600 dark:text-emerald-400">
+              {resumenMora.resumen.clientes_al_dia} clientes
+            </p>
+            <span className="text-[11px] text-emerald-700 dark:text-emerald-300">Riesgo bajo</span>
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/30 p-4 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">En Alerta (30-60d)</span>
+            <p className="mt-1 text-xl font-black text-amber-600 dark:text-amber-400">
+              {resumenMora.resumen.clientes_alerta} clientes
+            </p>
+            <span className="text-[11px] text-amber-700 dark:text-amber-300">Monitorear pagos</span>
+          </div>
+
+          <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/50 dark:bg-rose-950/30 p-4 shadow-sm">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-800 dark:text-rose-300">Morosos Críticos (&gt;60d)</span>
+            <p className="mt-1 text-xl font-black text-rose-600 dark:text-rose-400">
+              {resumenMora.resumen.clientes_morosos} clientes
+            </p>
+            <span className="text-[11px] text-rose-700 dark:text-rose-300">Pausar crédito</span>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
         {/* Lista de Clientes */}
@@ -97,14 +156,37 @@ export default function CuentaCorriente() {
             className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-2.5 text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-indigo-500 placeholder:text-slate-400 dark:placeholder:text-slate-500"
           />
 
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {[
+              { id: 'todos', label: 'Todos' },
+              { id: 'morosos', label: '🔴 Morosos' },
+              { id: 'alerta', label: '🟡 En Alerta' },
+              { id: 'al_dia', label: '🟢 Al Día' },
+            ].map(f => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setFiltroRiesgo(f.id)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                  filtroRiesgo === f.id
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
           <div className="max-h-[34rem] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700 rounded-xl border border-slate-200 dark:border-slate-700">
-            {clientesFiltrados.length === 0 ? (
-              <p className="p-6 text-center text-sm text-slate-500 dark:text-slate-400">No se encontraron clientes.</p>
+            {clientesConRiesgo.length === 0 ? (
+              <p className="p-6 text-center text-sm text-slate-500 dark:text-slate-400">No se encontraron clientes para este filtro.</p>
             ) : (
-              clientesFiltrados.map((c) => {
+              clientesConRiesgo.map((c) => {
                 const deuda = parseFloat(c.saldo_deuda || 0);
                 const limite = parseFloat(c.credito_limite || 0);
                 const esSeleccionado = clienteSeleccionado?.id === c.id;
+                const infoRiesgo = getRiesgoInfo(c.id);
 
                 return (
                   <div
@@ -113,8 +195,22 @@ export default function CuentaCorriente() {
                     className={`cursor-pointer p-4 transition-colors border-b border-slate-100 dark:border-slate-700/60 ${esSeleccionado ? 'bg-indigo-50/80 dark:bg-indigo-950/60 border-l-4 border-indigo-600' : 'hover:bg-slate-50 dark:hover:bg-slate-750/50'}`}
                   >
                     <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-slate-900 dark:text-slate-100">{c.nombre}</p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-slate-900 dark:text-slate-100">{c.nombre}</p>
+                          {infoRiesgo && (
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-black ${
+                              infoRiesgo.riesgo === 'rojo'
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border border-rose-300 dark:border-rose-800'
+                                : infoRiesgo.riesgo === 'amarillo'
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                            }`}>
+                              {infoRiesgo.riesgo === 'rojo' ? `Moroso (${infoRiesgo.dias_mora}d)` :
+                               infoRiesgo.riesgo === 'amarillo' ? `Alerta (${infoRiesgo.dias_mora}d)` : 'Al día'}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400">{c.documento ? `DNI/CUIT: ${c.documento}` : 'Sin documento'}</p>
                       </div>
                       <div className="text-right">

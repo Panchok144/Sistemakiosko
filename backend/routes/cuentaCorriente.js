@@ -15,6 +15,94 @@ router.get('/', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// ── GET /resumen-mora — Semáforo de riesgo crediticio y antigüedad de deuda ──
+router.get('/resumen-mora', async (req, res, next) => {
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
+
+  try {
+    const clientesRes = await db.query(
+      `SELECT
+         c.id, c.nombre, c.documento, c.telefono, c.email,
+         c.credito_limite, c.saldo_deuda,
+         MIN(CASE WHEN m.tipo = 'debito' THEN m.fecha ELSE NULL END) AS primer_debito_fecha,
+         MAX(CASE WHEN m.tipo = 'credito' THEN m.fecha ELSE NULL END) AS ultimo_pago_fecha,
+         COUNT(m.id) AS total_movimientos
+       FROM clientes c
+       LEFT JOIN movimientos_cuenta_corriente m ON c.id = m.cliente_id AND m.comercio_id = $1
+       WHERE c.comercio_id = $1 AND c.saldo_deuda > 0
+       GROUP BY c.id
+       ORDER BY c.saldo_deuda DESC`,
+      [comercioId]
+    );
+
+    const hoy = new Date();
+    let totalDeuda = 0;
+    let alDiaCount = 0;
+    let alertaCount = 0;
+    let morososCount = 0;
+
+    const listado = clientesRes.rows.map(c => {
+      const deuda = Number(c.saldo_deuda) || 0;
+      const limite = Number(c.credito_limite) || 0;
+      totalDeuda += deuda;
+
+      let diasMora = 0;
+      if (c.primer_debito_fecha) {
+        const fechaBase = c.ultimo_pago_fecha ? new Date(c.ultimo_pago_fecha) : new Date(c.primer_debito_fecha);
+        const diffMs = hoy - fechaBase;
+        diasMora = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      }
+
+      const pctUsoCredito = limite > 0 ? Math.round((deuda / limite) * 100) : 100;
+
+      let riesgo = 'verde';
+      let motivoRiesgo = 'Cuenta al día';
+
+      if (diasMora > 60 || (limite > 0 && deuda >= limite)) {
+        riesgo = 'rojo';
+        motivoRiesgo = diasMora > 60 ? `Mora crítica (${diasMora} días)` : 'Límite de crédito agotado';
+        morososCount++;
+      } else if (diasMora >= 30 || pctUsoCredito >= 80) {
+        riesgo = 'amarillo';
+        motivoRiesgo = diasMora >= 30 ? `Mora moderada (${diasMora} días)` : `Uso del crédito al ${pctUsoCredito}%`;
+        alertaCount++;
+      } else {
+        alDiaCount++;
+      }
+
+      return {
+        id: c.id,
+        nombre: c.nombre,
+        documento: c.documento,
+        telefono: c.telefono,
+        saldo_deuda: deuda,
+        credito_limite: limite,
+        dias_mora: diasMora,
+        porcentaje_credito_usado: pctUsoCredito,
+        riesgo,
+        motivo_riesgo: motivoRiesgo,
+        ultimo_pago_fecha: c.ultimo_pago_fecha,
+      };
+    });
+
+    res.json({
+      resumen: {
+        total_deuda_cobrar: Math.round(totalDeuda * 100) / 100,
+        clientes_con_deuda: listado.length,
+        clientes_al_dia: alDiaCount,
+        clientes_alerta: alertaCount,
+        clientes_morosos: morososCount,
+      },
+      clientes: listado,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /:cliente_id — Estado de cuenta de un cliente con movimientos
 router.get('/:cliente_id', async (req, res, next) => {
   const { cliente_id } = req.params;
