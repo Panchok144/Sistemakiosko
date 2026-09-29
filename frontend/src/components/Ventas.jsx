@@ -3,6 +3,7 @@ import apiClient from '../apiClient';
 import Swal from 'sweetalert2';
 import { Lock, History, ChevronDown, ChevronRight, AlertTriangle, LayoutGrid, List, CreditCard, DollarSign, ArrowRightLeft, ShieldAlert } from 'lucide-react';
 import { formatCurrency } from '../utils/formatters';
+import { calcularDesgloseBilletes, generarAtajosPago } from '../utils/vuelto';
 
 // ── Emojis por nombre de rubro (kiosko argentino) ─────────────────────────
 const RUBRO_EMOJI = {
@@ -668,19 +669,52 @@ export default function Ventas({
                   </div>
                 )}
 
-                {/* Efectivo: vuelto */}
+                {/* Efectivo: vuelto y desglose de billetes */}
                 {metodoPago === 'efectivo' && (
-                  <div className="flex items-center gap-3 rounded-xl border border-emerald-100 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 p-3">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Paga con</label>
-                      <input className="w-full rounded-lg border border-emerald-200 dark:border-emerald-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm font-bold text-emerald-900 dark:text-emerald-100 outline-none focus:border-emerald-500"
-                        type="number" placeholder="$0.00" value={pagaCon}
-                        onChange={(e) => setPagaCon(e.target.value)} />
+                  <div className="space-y-2 rounded-xl border border-emerald-100 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 p-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Paga con</label>
+                        <input className="w-full rounded-lg border border-emerald-200 dark:border-emerald-700 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm font-bold text-emerald-900 dark:text-emerald-100 outline-none focus:border-emerald-500"
+                          type="number" placeholder="$0.00" value={pagaCon}
+                          onChange={(e) => setPagaCon(e.target.value)} />
+                      </div>
+                      <div className="flex-1 text-right">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Vuelto</span>
+                        <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">${vuelto}</span>
+                      </div>
                     </div>
-                    <div className="flex-1 text-right">
-                      <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">Vuelto</span>
-                      <span className="text-xl font-black text-emerald-600 dark:text-emerald-400">${vuelto}</span>
+
+                    {/* Atajos de pago rápido */}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 mr-1">Rápido:</span>
+                      {generarAtajosPago(totalCarrito).map((sug) => (
+                        <button
+                          key={sug}
+                          type="button"
+                          onClick={() => setPagaCon(String(sug))}
+                          className="rounded-md border border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-800 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                        >
+                          {sug === totalCarrito ? 'Exacto' : `$${sug.toLocaleString('es-AR')}`}
+                        </button>
+                      ))}
                     </div>
+
+                    {/* Desglose de billetes sugerido si hay vuelto */}
+                    {parseFloat(vuelto) > 0 && (
+                      <div className="rounded-lg bg-white/80 dark:bg-slate-900/80 p-2 text-xs border border-emerald-100 dark:border-emerald-900/40">
+                        <span className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Desglose sugerido de billetes:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {calcularDesgloseBilletes(parseFloat(vuelto)).desglose.map((d, i) => (
+                            <span key={i} className="inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 text-[11px] font-black text-emerald-800 dark:text-emerald-300">
+                              {d.cantidad}x ${d.billete.toLocaleString('es-AR')}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
