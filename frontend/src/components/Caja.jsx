@@ -52,6 +52,58 @@ export default function Caja({ usuario }) {
     }
   };
 
+  const handleRetiroEfectivo = async () => {
+    if (!caja) return;
+    const { value: formValues } = await Swal.fire({
+      title: 'Retiro Parcial de Efectivo',
+      html: `
+        <div class="space-y-3 text-left">
+          <p class="text-xs text-slate-500">Registrar salida de efectivo físico (sangría para resguardo o pago inmediato).</p>
+          <label class="block text-xs font-bold text-slate-700">Monto a retirar ($):</label>
+          <input id="swal-retiro-monto" type="number" step="0.01" min="1" placeholder="Ej: 5000" class="w-full px-3 py-2 border rounded-lg text-sm" />
+          <label class="block text-xs font-bold text-slate-700">Motivo del retiro:</label>
+          <input id="swal-retiro-motivo" type="text" placeholder="Ej: Sangría para depósito seguro" class="w-full px-3 py-2 border rounded-lg text-sm" />
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'Confirmar Retiro',
+      cancelButtonText: 'Cancelar',
+      confirmButtonColor: '#e11d48',
+      preConfirm: () => {
+        const monto = document.getElementById('swal-retiro-monto')?.value;
+        const motivo = document.getElementById('swal-retiro-motivo')?.value;
+        if (!monto || Number(monto) <= 0) {
+          Swal.showValidationMessage('Ingresá un monto válido mayor a 0');
+          return false;
+        }
+        if (!motivo || !motivo.trim()) {
+          Swal.showValidationMessage('El motivo es obligatorio');
+          return false;
+        }
+        return { monto: Number(monto), motivo: motivo.trim() };
+      }
+    });
+
+    if (formValues) {
+      try {
+        const { data } = await apiClient.post(`/api/caja/${caja.id}/retiro-efectivo`, formValues);
+        Swal.fire({
+          icon: 'success',
+          title: 'Retiro Registrado',
+          text: `${data.mensaje}. Saldo restante en efectivo: $${data.saldo_restante}`,
+          timer: 3000
+        });
+        cargarCaja();
+      } catch (err) {
+        Swal.fire({
+          icon: 'error',
+          title: 'Error en retiro',
+          text: err.response?.data?.error || err.message
+        });
+      }
+    }
+  };
+
 
   useEffect(() => {
     if (authReady && token) {
@@ -258,12 +310,21 @@ export default function Caja({ usuario }) {
           {/* Panel Resumen de Turno */}
           <div className="lg:col-span-2 space-y-6">
             <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/30 p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
                   <span className="flex h-3 w-3 rounded-full bg-emerald-500 animate-pulse" />
                   <h2 className="text-base font-bold text-emerald-950 dark:text-emerald-100">Caja Abierta — Turno #{caja.id}</h2>
                 </div>
-                <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">Apertura: {formatDate(caja.fecha_apertura)}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRetiroEfectivo}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-sm"
+                    title="Registrar sangría o retiro parcial de efectivo físico"
+                  >
+                    <ArrowDownRight size={14} /> Retirar Efectivo
+                  </button>
+                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">Apertura: {formatDate(caja.fecha_apertura)}</span>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
