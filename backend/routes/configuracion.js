@@ -5,7 +5,10 @@ const { autorizarRoles } = require('../middleware/auth');
 
 // GET /api/configuracion/comercio — Devuelve solo los datos del comercio
 router.get('/comercio', async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
   try {
     const result = await db.query('SELECT * FROM comercios WHERE id = $1', [comercioId]);
     if (result.rowCount === 0) {
@@ -20,7 +23,10 @@ router.get('/comercio', async (req, res) => {
 
 // GET /api/configuracion — Devuelve configuración completa del comercio
 router.get('/', async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
   try {
     const [comercioRes, configRes] = await Promise.all([
       db.query('SELECT * FROM comercios WHERE id = $1', [comercioId]),
@@ -47,7 +53,10 @@ router.get('/', async (req, res) => {
 
 // PUT /api/configuracion — Guarda datos del comercio y parámetros (solo admin/dueño)
 router.put('/', autorizarRoles('administrador', 'dueno'), async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
   const {
     razon_social, cuit, domicilio, condicion_fiscal,
     punto_venta, email, telefono, leyenda_ticket,

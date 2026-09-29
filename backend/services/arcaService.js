@@ -1,95 +1,123 @@
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
+'use strict';
 
-const ARCA_URL = process.env.ARCA_URL || 'https://homologacion.arca.gob.ar/wsfex';
-const CERT_PATH = process.env.ARCA_CERT_PATH || path.join(__dirname, '..', 'certs', 'arca.crt');
-const KEY_PATH = process.env.ARCA_KEY_PATH || path.join(__dirname, '..', 'certs', 'arca.key');
-const PASSPHRASE = process.env.ARCA_PASSPHRASE || '';
-const USE_MOCK = process.env.ARCA_USE_MOCK === 'true';
+const db = require('../db/conexion');
+const { registrarAuditoria } = require('./auditoriaService');
+const { solicitarCAESoap } = require('./arcaSoap');
 
 /**
- * Genera un CAE en ARCA/AFIP.
- *
- * IMPORTANTE — Flujo correcto (ACID):
- *   1. La transacci\u00f3n de BD reserva el n\u00famero de comprobante en `secuencias_facturacion`
- *      usando SELECT ... FOR UPDATE (row-level lock de Postgres).
- *   2. Se hace INSERT en `ventas` con estado='pendiente_cae' y el nro_comprobante reservado.
- *   3. Reci\u00e9n entonces se llama a esta funci\u00f3n con ese n\u00famero ya fijo.
- *   4. Si AFIP responde OK → UPDATE ventas SET cae=..., estado='aprobada'.
- *   5. Si AFIP falla → UPDATE ventas SET estado='error_afip' (la venta local persiste).
- *
- * @param {object} datosFactura - Datos de la factura incluyendo `nro_comprobante` (reservado en BD)
+ * Función wrapper para generar CAE usando el cliente SOAP aislado.
+ * @param {Object} datosFactura
  */
-function generarCAE(datosFactura) {
-    if (USE_MOCK) {
-        return Promise.resolve({
-            cae: `MOCK-CAE-${Date.now()}`,
-            cae_vencimiento: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
-            mensaje: 'Modo homologación MOCK activado. No se realizó conexión real a ARCA.'
-        });
+async function generarCAE(datosFactura) {
+  return await solicitarCAESoap(datosFactura);
+}
+
+/**
+ * Procesa la autorización CAE de una venta en segundo plano.
+ * Si tiene éxito, actualiza estado a 'aprobada'.
+ * Si falla, incrementa reintentos; al alcanzar maxReintentos pasa a 'error_afip'.
+ *
+ * @param {number} idVenta
+ * @param {number} maxReintentos
+ */
+async function procesarVentaCAE(idVenta, maxReintentos = 3) {
+  try {
+    const ventaRes = await db.query(
+      `SELECT v.*, u.nombre_usuario, c.nombre AS comercio_nombre
+       FROM ventas v
+       LEFT JOIN usuarios u ON v.id_usuario = u.id
+       LEFT JOIN comercios c ON v.comercio_id = c.id
+       WHERE v.id = $1`,
+      [idVenta]
+    );
+
+    if (ventaRes.rowCount === 0) {
+      console.warn(`[arcaService] Venta #${idVenta} no encontrada para procesar CAE.`);
+      return;
     }
 
-    if (!fs.existsSync(CERT_PATH) || !fs.existsSync(KEY_PATH)) {
-        return Promise.reject(new Error(`Faltan certificados ARCA. Debes configurar ARCA_CERT_PATH y ARCA_KEY_PATH en .env.`));
+    const venta = ventaRes.rows[0];
+
+    // Si ya está aprobada, no hacer nada
+    if (venta.estado === 'aprobada') {
+      return { status: 'aprobada', cae: venta.cae };
     }
 
-    // Aquí deberías construir la solicitud SOAP/XML requerida por ARCA y firmarla.
-    // El siguiente bloque es un ejemplo de cómo enviar una petición HTTPS con certificados.
-    const payload = JSON.stringify({
-        tipo_comprobante: datosFactura.tipo_comprobante,
-        total: datosFactura.total,
-        cliente: datosFactura.cliente || { nombre: 'Final', documento: '00000000' },
-        productos: datosFactura.productos,
-        metodo_pago: datosFactura.metodo_pago,
-        usuario_id: datosFactura.id_usuario
-    });
+    const prodsRes = await db.query(
+      `SELECT dv.*, p.nombre, p.codigo_barras
+       FROM detalle_ventas dv
+       LEFT JOIN productos p ON dv.id_producto = p.id
+       WHERE dv.id_venta = $1`,
+      [idVenta]
+    );
 
-    const options = {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(payload)
-        },
-        cert: fs.readFileSync(CERT_PATH),
-        key: fs.readFileSync(KEY_PATH),
-        passphrase: PASSPHRASE,
-        rejectUnauthorized: false
+    const datosFactura = {
+      tipo_comprobante: venta.tipo_comprobante,
+      nro_comprobante: venta.nro_comprobante,
+      punto_venta: venta.punto_venta || 1,
+      total: Number(venta.total),
+      cliente: {
+        nombre: venta.cliente_nombre || 'Consumidor Final',
+        documento: venta.cliente_documento || '00000000',
+      },
+      productos: prodsRes.rows,
+      metodo_pago: venta.metodo_pago,
+      id_usuario: venta.id_usuario,
     };
 
-    return new Promise((resolve, reject) => {
-        const request = https.request(ARCA_URL, options, (response) => {
-            let data = '';
-            response.on('data', (chunk) => {
-                data += chunk;
-            });
-            response.on('end', () => {
-                try {
-                    const resultado = JSON.parse(data);
-                    if (resultado.cae) {
-                        resolve({
-                            cae: resultado.cae,
-                            cae_vencimiento: resultado.cae_vencimiento || resultado.vencimiento,
-                            mensaje: 'CAE obtenido correctamente desde ARCA.'
-                        });
-                    } else {
-                        reject(new Error(resultado.error || 'No se recibió CAE de ARCA')); 
-                    }
-                } catch (error) {
-                    reject(new Error(`Error al interpretar la respuesta de ARCA: ${error.message}`));
-                }
-            });
-        });
+    try {
+      const resultadoArca = await solicitarCAESoap(datosFactura);
 
-        request.on('error', (error) => {
-            reject(new Error(`Error en la conexión con ARCA: ${error.message}`));
-        });
+      await db.query(
+        `UPDATE ventas
+         SET cae = $1, cae_vencimiento = $2, estado = 'aprobada', error_afip_detalle = NULL
+         WHERE id = $3`,
+        [resultadoArca.cae, resultadoArca.cae_vencimiento, idVenta]
+      );
 
-        request.write(payload);
-        request.end();
-    });
+      await registrarAuditoria({
+        tipo_evento: 'CAE_APROBADO',
+        descripcion: `CAE ${resultadoArca.cae} obtenido con éxito para venta #${idVenta} (${venta.tipo_comprobante})`,
+        usuario_id: venta.id_usuario,
+        comercio_id: venta.comercio_id,
+      });
+
+      return {
+        status: 'aprobada',
+        cae: resultadoArca.cae,
+        cae_vencimiento: resultadoArca.cae_vencimiento,
+      };
+    } catch (errArca) {
+      const reintentosActuales = (venta.reintentos_cae || 0) + 1;
+      const nuevoEstado = reintentosActuales >= maxReintentos ? 'error_afip' : 'pendiente_cae';
+
+      await db.query(
+        `UPDATE ventas
+         SET estado = $1, error_afip_detalle = $2, reintentos_cae = $3
+         WHERE id = $4`,
+        [nuevoEstado, errArca.message, reintentosActuales, idVenta]
+      );
+
+      await registrarAuditoria({
+        tipo_evento: nuevoEstado === 'error_afip' ? 'ALERTA_AFIP_FALLO' : 'REINTENTO_CAE',
+        descripcion: `Fallo al obtener CAE para venta #${idVenta} (Intento ${reintentosActuales}/${maxReintentos}): ${errArca.message}`,
+        usuario_id: venta.id_usuario,
+        comercio_id: venta.comercio_id,
+      });
+
+      return {
+        status: nuevoEstado,
+        error: errArca.message,
+        reintentos: reintentosActuales,
+      };
+    }
+  } catch (error) {
+    console.error(`[arcaService] Error procesando CAE para venta #${idVenta}:`, error);
+    throw error;
+  }
 }
 
 module.exports = {
-    generarCAE
+  generarCAE,
+  procesarVentaCAE,
 };

@@ -1,12 +1,37 @@
 import { useState } from "react";
+import apiClient from "../apiClient";
+import Swal from "sweetalert2";
+import { RefreshCw } from "lucide-react";
 
 export default function Historial({ historial = [], canViewFinancials, totalRecaudado = 0, verDetalleVenta }) {
   const [busquedaFecha, setBusquedaFecha] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [reintentandoId, setReintentandoId] = useState(null);
   const itemsPerPage = 50;
 
   const hist = Array.isArray(historial) ? historial : [];
   const totalRec = parseFloat(totalRecaudado) || 0;
+
+  const reintentarCae = async (idVenta) => {
+    setReintentandoId(idVenta);
+    try {
+      const res = await apiClient.post(`/api/ventas/${idVenta}/reintentar-cae`);
+      if (res.data.estado === 'aprobada') {
+        Swal.fire('✅ CAE Autorizado', `Factura aprobada por ARCA/AFIP. CAE: ${res.data.cae}`, 'success');
+      } else {
+        Swal.fire('⚠️ Reintento Registrado', res.data.error || res.data.mensaje, 'info');
+      }
+      const target = hist.find(v => v.id === idVenta);
+      if (target) {
+        target.estado = res.data.estado;
+        target.cae = res.data.cae;
+      }
+    } catch (err) {
+      Swal.fire('❌ Error al autorizar', err.response?.data?.error || err.message, 'error');
+    } finally {
+      setReintentandoId(null);
+    }
+  };
 
   const historialFiltrado = hist.filter(v => {
     if (!busquedaFecha) return true;
@@ -67,6 +92,7 @@ export default function Historial({ historial = [], canViewFinancials, totalReca
                 <th className="px-5 py-3">ID Venta</th>
                 <th className="px-5 py-3">Fecha y Hora</th>
                 <th className="px-5 py-3">Vendedor</th>
+                <th className="px-5 py-3">Comprobante / CAE</th>
                 <th className="px-5 py-3">Monto Total</th>
                 <th className="px-5 py-3 text-center">Detalle</th>
               </tr>
@@ -74,29 +100,80 @@ export default function Historial({ historial = [], canViewFinancials, totalReca
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-800">
               {historialFiltrado.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
+                  <td colSpan="6" className="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
                     <span className="mb-2 block text-4xl opacity-50">🧾</span>
                     {busquedaFecha ? 'No se encontraron ventas para esa fecha.' : 'No hay ventas registradas todavía.'}
                   </td>
                 </tr>
               ) : (
-                paginatedHistorial.map((venta) => (
-                  <tr key={venta.id} className="hover:bg-slate-50 dark:hover:bg-slate-750/50 transition-colors">
-                    <td className="px-5 py-3 font-mono font-bold text-slate-900 dark:text-slate-100">#{venta.id}</td>
-                    <td className="px-5 py-3 text-slate-600 dark:text-slate-400 text-xs">{new Date(venta.fecha).toLocaleString()}</td>
-                    <td className="px-5 py-3 font-semibold text-slate-800 dark:text-slate-200">{venta.vendedor || 'Desconocido'}</td>
-                    <td className="px-5 py-3 font-black text-emerald-600 dark:text-emerald-400">${parseFloat(venta.total).toFixed(2)}</td>
-                    <td className="px-5 py-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => verDetalleVenta(venta.id)}
-                        className="mx-auto flex items-center justify-center gap-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition-all hover:bg-indigo-600 hover:text-white"
-                      >
-                        <span>👁️</span> Ver Ticket
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                paginatedHistorial.map((venta) => {
+                  const esFactura = ['factura_a', 'factura_b'].includes(venta.tipo_comprobante);
+                  return (
+                    <tr key={venta.id} className="hover:bg-slate-50 dark:hover:bg-slate-750/50 transition-colors">
+                      <td className="px-5 py-3 font-mono font-bold text-slate-900 dark:text-slate-100">#{venta.id}</td>
+                      <td className="px-5 py-3 text-slate-600 dark:text-slate-400 text-xs">{new Date(venta.fecha).toLocaleString()}</td>
+                      <td className="px-5 py-3 font-semibold text-slate-800 dark:text-slate-200">{venta.vendedor || 'Desconocido'}</td>
+                      <td className="px-5 py-3 text-xs">
+                        {esFactura ? (
+                          <div className="flex flex-col gap-1 items-start">
+                            {venta.estado === 'aprobada' ? (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                ✓ CAE: {venta.cae || 'Aprobado'}
+                              </span>
+                            ) : venta.estado === 'pendiente_cae' ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  ⏳ Pendiente CAE
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={reintentandoId === venta.id}
+                                  onClick={() => reintentarCae(venta.id)}
+                                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 transition"
+                                >
+                                  <RefreshCw size={10} className={reintentandoId === venta.id ? 'animate-spin' : ''} />
+                                  Reintentar
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800" title={venta.error_afip_detalle || 'Error AFIP'}>
+                                  ❌ Error AFIP
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={reintentandoId === venta.id}
+                                  onClick={() => reintentarCae(venta.id)}
+                                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 transition"
+                                >
+                                  <RefreshCw size={10} className={reintentandoId === venta.id ? 'animate-spin' : ''} />
+                                  Reintentar
+                                </button>
+                              </div>
+                            )}
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {venta.tipo_comprobante === 'factura_a' ? 'Factura A' : 'Factura B'} #{venta.nro_comprobante || '---'}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-700/60 dark:text-slate-300">
+                            Ticket Interno
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 font-black text-emerald-600 dark:text-emerald-400">${parseFloat(venta.total).toFixed(2)}</td>
+                      <td className="px-5 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => verDetalleVenta(venta.id)}
+                          className="mx-auto flex items-center justify-center gap-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 transition-all hover:bg-indigo-600 hover:text-white"
+                        >
+                          <span>👁️</span> Ver Ticket
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

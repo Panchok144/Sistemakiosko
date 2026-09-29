@@ -37,6 +37,7 @@ export default function Configuracion({ canManageCatalog }) {
   // Parámetros
   const [montoMinimo, setMontoMinimo] = useState('500000');
   const [limiteVariacion, setLimiteVariacion] = useState('30');
+  const [facturaElectronicaHabilitada, setFacturaElectronicaHabilitada] = useState(false);
 
   // Empleados
   const [usuarios, setUsuarios] = useState([]);
@@ -66,6 +67,7 @@ export default function Configuracion({ canManageCatalog }) {
       });
       setMontoMinimo(params?.monto_minimo_identificar || '500000');
       setLimiteVariacion(params?.limite_variacion_precio_pct || '30');
+      setFacturaElectronicaHabilitada(params?.factura_electronica_habilitada === 'true');
     } catch (err) {
       console.error(err);
     } finally {
@@ -97,6 +99,7 @@ export default function Configuracion({ canManageCatalog }) {
         params: {
           monto_minimo_identificar: montoMinimo,
           limite_variacion_precio_pct: limiteVariacion,
+          factura_electronica_habilitada: facturaElectronicaHabilitada ? 'true' : 'false',
         },
       });
       Swal.fire('✅ Guardado', 'Configuración actualizada con éxito', 'success');
@@ -320,6 +323,40 @@ export default function Configuracion({ canManageCatalog }) {
                   <p className="mt-2 text-xs text-rose-800 dark:text-rose-300">
                     Si el nuevo precio difiere más de este porcentaje del precio anterior, el sistema pedirá confirmación.
                   </p>
+                </div>
+
+                {/* C6: Flag de Facturación Electrónica ARCA/AFIP */}
+                <div className="md:col-span-2 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/20 p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Shield className="text-indigo-600 dark:text-indigo-400" size={18} />
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                          Facturación Electrónica Legal (ARCA / AFIP)
+                        </h3>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          facturaElectronicaHabilitada
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                            : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                        }`}>
+                          {facturaElectronicaHabilitada ? 'Habilitada' : 'Deshabilitada'}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-xs text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
+                        Si está <strong>desactivada</strong>, el Punto de Venta operará en modo local/ticket interno rápido.
+                        Si está <strong>activada</strong>, las ventas con Factura A y B solicitarán CAE en segundo plano sin demorar la atención al cliente.
+                      </p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={facturaElectronicaHabilitada}
+                        onChange={(e) => setFacturaElectronicaHabilitada(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
