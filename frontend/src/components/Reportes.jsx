@@ -21,6 +21,8 @@ export default function Reportes() {
   const [reporteMargenes, setReporteMargenes] = useState([]);
   const [reporteRotacion, setReporteRotacion] = useState([]);
   const [reporteRubros, setReporteRubros] = useState([]);
+  const [reporteAbc, setReporteAbc] = useState(null);
+  const [filtroClaseAbc, setFiltroClaseAbc] = useState('todas');
 
   useEffect(() => {
     cargarReporte();
@@ -44,6 +46,9 @@ export default function Reportes() {
       } else if (tab === 'rubros') {
         const res = await apiClient.get(`/api/reportes/rubros?desde=${desde}&hasta=${hasta}`);
         setReporteRubros(res.data || []);
+      } else if (tab === 'abc') {
+        const res = await apiClient.get('/api/reportes/analisis-abc?dias=90');
+        setReporteAbc(res.data);
       }
     } catch (err) {
       console.error(err);
@@ -93,6 +98,7 @@ export default function Reportes() {
           { id: 'margenes', label: '💰 Márgenes & Ganancia' },
           { id: 'rotacion', label: '🔄 Rotación (30 días)' },
           { id: 'rubros', label: '🏷️ Por Categoría' },
+          { id: 'abc', label: '🎯 Clasificación ABC (80/20)' },
         ].map((t) => (
           <button
             key={t.id}
@@ -350,6 +356,143 @@ export default function Reportes() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: CLASIFICACIÓN ABC PARETO */}
+          {tab === 'abc' && reporteAbc && (
+            <div className="space-y-6">
+              {/* Header & Description */}
+              <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/40 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-bold text-indigo-950 dark:text-indigo-100">Principio de Pareto (Regla 80/20) para Minimarkets</h3>
+                    <p className="mt-1 text-xs text-indigo-800/80 dark:text-indigo-300 max-w-2xl">
+                      El 20% de tus productos genera el 80% de tus ventas. Clasificá tu catálogo para priorizar la reposición de productos estrella y reducir capital inmovilizado en productos de baja rotación.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => exportarExcel(
+                      [...(reporteAbc.categoria_a || []), ...(reporteAbc.categoria_b || []), ...(reporteAbc.categoria_c || [])],
+                      'Analisis_ABC_Inventario'
+                    )}
+                    className="flex items-center gap-2 rounded-xl bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 transition shadow-sm"
+                  >
+                    📥 Exportar Clasificación
+                  </button>
+                </div>
+              </div>
+
+              {/* 3 ABC Cards */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/30 p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-black text-white">CLASE A</span>
+                    <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">~80% Ventas</span>
+                  </div>
+                  <p className="mt-3 text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                    ${(reporteAbc.resumen?.categoria_a?.ingresos || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
+                    {reporteAbc.resumen?.categoria_a?.cantidad || 0} productos ({reporteAbc.resumen?.categoria_a?.porcentaje_catalogo || 0}% del catálogo)
+                  </p>
+                  <p className="mt-2 text-[11px] text-emerald-700 dark:text-emerald-300">
+                    ★ Productos estrella. Nunca deben quebrar stock.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/40 dark:bg-amber-950/30 p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-lg bg-amber-500 px-2.5 py-1 text-xs font-black text-white">CLASE B</span>
+                    <span className="text-xs font-bold text-amber-800 dark:text-amber-300">~15% Ventas</span>
+                  </div>
+                  <p className="mt-3 text-2xl font-black text-amber-600 dark:text-amber-400">
+                    ${(reporteAbc.resumen?.categoria_b?.ingresos || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300 font-medium">
+                    {reporteAbc.resumen?.categoria_b?.cantidad || 0} productos ({reporteAbc.resumen?.categoria_b?.porcentaje_catalogo || 0}% del catálogo)
+                  </p>
+                  <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                    ● Rotación intermedia. Reposición semanal estándar.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-lg bg-slate-600 px-2.5 py-1 text-xs font-black text-white">CLASE C</span>
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300">~5% Ventas</span>
+                  </div>
+                  <p className="mt-3 text-2xl font-black text-slate-700 dark:text-slate-300">
+                    ${(reporteAbc.resumen?.categoria_c?.ingresos || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400 font-medium">
+                    {reporteAbc.resumen?.categoria_c?.cantidad || 0} productos ({reporteAbc.resumen?.categoria_c?.porcentaje_catalogo || 0}% del catálogo)
+                  </p>
+                  <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    ▼ Baja rotación. Evaluar promociones o reducir compra.
+                  </p>
+                </div>
+              </div>
+
+              {/* Table with Filter */}
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-6 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                  <h4 className="font-bold text-slate-900 dark:text-slate-100">Listado de Artículos Clasificados</h4>
+                  <div className="flex gap-1.5">
+                    {['todas', 'A', 'B', 'C'].map((cl) => (
+                      <button
+                        key={cl}
+                        type="button"
+                        onClick={() => setFiltroClaseAbc(cl)}
+                        className={`rounded-lg px-3 py-1 text-xs font-bold transition ${filtroClaseAbc === cl ? 'bg-indigo-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'}`}
+                      >
+                        {cl === 'todas' ? 'Todos' : `Clase ${cl}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-750 text-xs uppercase font-bold text-slate-700 dark:text-slate-300">
+                      <tr>
+                        <th className="px-4 py-3">Clase</th>
+                        <th className="px-4 py-3">Producto</th>
+                        <th className="px-4 py-3">Rubro</th>
+                        <th className="px-4 py-3 text-right">Stock</th>
+                        <th className="px-4 py-3 text-right">Unidades Vendidas</th>
+                        <th className="px-4 py-3 text-right">Ingresos</th>
+                        <th className="px-4 py-3 text-right">% Facturación</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {[...(reporteAbc.categoria_a || []), ...(reporteAbc.categoria_b || []), ...(reporteAbc.categoria_c || [])]
+                        .filter(p => filtroClaseAbc === 'todas' || p.clase === filtroClaseAbc)
+                        .map((p) => (
+                          <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-750/50">
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-black ${
+                                p.clase === 'A' ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800' :
+                                p.clase === 'B' ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800' :
+                                'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                              }`}>
+                                Clase {p.clase}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 font-bold text-slate-900 dark:text-slate-100">{p.nombre}</td>
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{p.rubro || '-'}</td>
+                            <td className="px-4 py-3 text-right font-medium text-slate-900 dark:text-slate-100">{p.stock}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-slate-800 dark:text-slate-200">{p.unidades_vendidas}</td>
+                            <td className="px-4 py-3 text-right font-black text-indigo-600 dark:text-indigo-400">
+                              ${p.ingresos_totales.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-slate-700 dark:text-slate-300">{p.pct_ingresos}%</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

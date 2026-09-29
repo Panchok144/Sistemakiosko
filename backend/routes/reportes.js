@@ -187,6 +187,95 @@ router.get('/rotacion', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// ── GET /analisis-abc — Clasificación ABC de productos (Pareto 80/20) ─────────
+router.get('/analisis-abc', async (req, res, next) => {
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) {
+    return res.status(401).json({ error: 'No autorizado: falta comercio_id' });
+  }
+
+  const dias = Math.min(parseInt(req.query.dias || 90, 10), 365);
+  const fechaLimite = new Date();
+  fechaLimite.setDate(fechaLimite.getDate() - dias);
+
+  try {
+    const result = await db.query(
+      `SELECT
+         p.id, p.nombre, p.rubro, p.marca, p.stock, p.costo, p.precio_venta,
+         COALESCE(SUM(dv.cantidad), 0) AS unidades_vendidas,
+         COALESCE(SUM(dv.cantidad * dv.precio_unitario), 0) AS ingresos_totales
+       FROM productos p
+       LEFT JOIN detalle_ventas dv ON p.id = dv.id_producto AND dv.comercio_id = $1
+       LEFT JOIN ventas v ON dv.id_venta = v.id
+         AND v.comercio_id = $1
+         AND v.fecha >= $2
+         AND v.estado != 'error_afip'
+       WHERE p.comercio_id = $1 AND p.activo = true
+       GROUP BY p.id
+       ORDER BY ingresos_totales DESC, p.nombre ASC`,
+      [comercioId, fechaLimite.toISOString()]
+    );
+
+    const productos = result.rows.map(r => ({
+      ...r,
+      unidades_vendidas: Number(r.unidades_vendidas) || 0,
+      ingresos_totales: Math.round((Number(r.ingresos_totales) || 0) * 100) / 100,
+    }));
+
+    const totalIngresos = productos.reduce((acc, p) => acc + p.ingresos_totales, 0);
+
+    let acumulado = 0;
+    const catA = [];
+    const catB = [];
+    const catC = [];
+
+    for (const prod of productos) {
+      acumulado += prod.ingresos_totales;
+      const pctAcumulado = totalIngresos > 0 ? (acumulado / totalIngresos) * 100 : 100;
+      const pctIndividual = totalIngresos > 0 ? (prod.ingresos_totales / totalIngresos) * 100 : 0;
+
+      if (pctAcumulado <= 80 || catA.length === 0) {
+        catA.push({ ...prod, clase: 'A', pct_ingresos: Math.round(pctIndividual * 100) / 100 });
+      } else if (pctAcumulado <= 95) {
+        catB.push({ ...prod, clase: 'B', pct_ingresos: Math.round(pctIndividual * 100) / 100 });
+      } else {
+        catC.push({ ...prod, clase: 'C', pct_ingresos: Math.round(pctIndividual * 100) / 100 });
+      }
+    }
+
+    res.json({
+      periodo_dias: dias,
+      total_ingresos: Math.round(totalIngresos * 100) / 100,
+      total_productos: productos.length,
+      resumen: {
+        categoria_a: {
+          cantidad: catA.length,
+          porcentaje_catalogo: productos.length > 0 ? Math.round((catA.length / productos.length) * 100) : 0,
+          ingresos: Math.round(catA.reduce((s, p) => s + p.ingresos_totales, 0) * 100) / 100,
+          descripcion: 'Productos estrella (generan ~80% de las ventas). Mantener stock siempre.',
+        },
+        categoria_b: {
+          cantidad: catB.length,
+          porcentaje_catalogo: productos.length > 0 ? Math.round((catB.length / productos.length) * 100) : 0,
+          ingresos: Math.round(catB.reduce((s, p) => s + p.ingresos_totales, 0) * 100) / 100,
+          descripcion: 'Rotación intermedia (generan ~15% de las ventas). Reposición estándar.',
+        },
+        categoria_c: {
+          cantidad: catC.length,
+          porcentaje_catalogo: productos.length > 0 ? Math.round((catC.length / productos.length) * 100) : 0,
+          ingresos: Math.round(catC.reduce((s, p) => s + p.ingresos_totales, 0) * 100) / 100,
+          descripcion: 'Baja rotación / cola larga (generan ~5% de ventas). Evaluar promociones.',
+        },
+      },
+      categoria_a: catA,
+      categoria_b: catB,
+      categoria_c: catC,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /rubros — Ventas por categoría/rubro
 router.get('/rubros', async (req, res, next) => {
   const comercioId = req.usuario?.comercio_id;
