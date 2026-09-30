@@ -36,7 +36,7 @@ router.get('/me', authMiddleware, (req, res) => {
 
 // GET /api/usuarios — Lista todos los usuarios del comercio (solo admin/dueño)
 router.get('/', authMiddleware, autorizarRoles('administrador', 'dueno'), async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   try {
     const result = await db.query(
       'SELECT id, nombre_usuario, rol, suscripcion_activa, created_at FROM usuarios WHERE comercio_id = $1 ORDER BY nombre_usuario ASC',
@@ -51,7 +51,7 @@ router.get('/', authMiddleware, autorizarRoles('administrador', 'dueno'), async 
 // DELETE /api/usuarios/:id — Eliminar empleado (solo admin/dueño, no puede eliminarse a sí mismo)
 router.delete('/:id', authMiddleware, autorizarRoles('administrador', 'dueno'), async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   if (parseInt(id) === req.usuario?.id) {
     return res.status(400).json({ error: 'No puedes eliminar tu propio usuario' });
   }
@@ -73,7 +73,7 @@ router.post('/suscripcion', authMiddleware, autorizarRoles('administrador', 'due
   const suscripcionActiva = activa === true || activa === 'true' || activa === 1 || activa === '1';
   const fecha = hasta ? new Date(hasta) : null;
   const fechaParaGuardar = fecha && !Number.isNaN(fecha.getTime()) ? fecha.toISOString() : null;
-  const comercioId = req.usuario.comercio_id || 1;
+  const comercioId = req.usuario.comercio_id;
 
   try {
     const result = await db.query(
@@ -195,6 +195,104 @@ router.post('/login', loginLimiter, async (req, res) => {
     console.error('Error en login:', error);
     return res.status(500).json({ error: 'Error en la base de datos', detalle: error.message });
   }
+});
+
+// GET /api/usuarios/mis-permisos (M11)
+router.get('/mis-permisos', authMiddleware, async (req, res, next) => {
+  const { comercio_id, rol } = req.usuario;
+  const esSuper = rol === 'superadmin' || rol === 'dueno';
+
+  try {
+    const flagsDefecto = {
+      descuento: esSuper,
+      devolucion: esSuper,
+      ver_costos: esSuper,
+      cerrar_caja: esSuper,
+      cambiar_precios: esSuper,
+      crear_usuarios: esSuper,
+    };
+
+    if (esSuper) {
+      return res.json({ flags: flagsDefecto, rol, esSuper: true });
+    }
+
+    const result = await db.query(
+      `SELECT accion, activo FROM permisos_rol
+       WHERE comercio_id = $1 AND rol = $2 AND recurso = 'flag'`,
+      [comercio_id, rol]
+    );
+
+    const flags = { ...flagsDefecto };
+    if (rol === 'administrador') {
+      for (const k of Object.keys(flags)) flags[k] = true;
+    }
+    for (const row of result.rows) {
+      if (row.accion in flags) {
+        flags[row.accion] = row.activo;
+      }
+    }
+
+    res.json({ flags, rol, esSuper: false });
+  } catch (error) { next(error); }
+});
+
+// POST /api/usuarios/bloquear-pos (M12)
+router.post('/bloquear-pos', authMiddleware, async (req, res, next) => {
+  const { id, comercio_id } = req.usuario;
+  try {
+    await registrarAuditoria({
+      tipo_evento: 'POS_BLOQUEO',
+      descripcion: 'POS bloqueado por inactividad',
+      usuario_id: id,
+      comercio_id,
+    });
+    res.json({ mensaje: 'Bloqueo registrado' });
+  } catch (error) { next(error); }
+});
+
+// POST /api/usuarios/desbloquear-pos (M12)
+router.post('/desbloquear-pos', authMiddleware, async (req, res, next) => {
+  const { id, comercio_id } = req.usuario;
+  const { pin } = req.body;
+
+  if (!pin) {
+    return res.status(400).json({ error: 'Debe ingresar el PIN o contraseña para continuar' });
+  }
+
+  try {
+    const userRes = await db.query(
+      'SELECT id, nombre_usuario, password, pin_supervisor FROM usuarios WHERE id = $1 AND comercio_id = $2',
+      [id, comercio_id]
+    );
+
+    if (userRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const user = userRes.rows[0];
+    let valido = false;
+
+    // Verificar contra pin_supervisor
+    if (user.pin_supervisor && String(user.pin_supervisor).trim() === String(pin).trim()) {
+      valido = true;
+    } else {
+      // Fallback: verificar con contraseña
+      valido = await bcrypt.compare(String(pin), user.password);
+    }
+
+    if (!valido) {
+      return res.status(401).json({ error: 'PIN o contraseña incorrectos' });
+    }
+
+    await registrarAuditoria({
+      tipo_evento: 'POS_DESBLOQUEO',
+      descripcion: `POS desbloqueado exitosamente por '${user.nombre_usuario}'`,
+      usuario_id: id,
+      comercio_id,
+    });
+
+    res.json({ mensaje: 'POS desbloqueado con éxito', usuario: user.nombre_usuario });
+  } catch (error) { next(error); }
 });
 
 module.exports = router;

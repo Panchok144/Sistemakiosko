@@ -122,14 +122,29 @@ function ModuleBadge({ badgeKey, badges, accentHex }) {
 
   if (badgeKey === 'stock_bajo') {
     const count = badges.stock_bajo || 0;
-    if (count === 0) return null;
+    const porVencer = badges.por_vencer || 0;
+    if (count === 0 && porVencer === 0) return null;
     return (
-      <span
-        className="absolute -top-1.5 -right-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[9px] font-black text-white shadow-md"
-        style={{ background: '#ef4444', border: '2px solid var(--surface-card)' }}
-      >
-        {count > 99 ? '99+' : count}
-      </span>
+      <div className="absolute -top-1.5 -right-1.5 flex items-center gap-1 z-10">
+        {count > 0 && (
+          <span
+            className="flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[9px] font-black text-white shadow-md"
+            style={{ background: '#ef4444', border: '2px solid var(--surface-card)' }}
+            title={`${count} productos bajo stock`}
+          >
+            {count > 99 ? '99+' : count}
+          </span>
+        )}
+        {porVencer > 0 && (
+          <span
+            className="flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[9px] font-black text-white shadow-md animate-pulse"
+            style={{ background: '#f59e0b', border: '2px solid var(--surface-card)' }}
+            title={`${porVencer} lotes próximos a vencer (30 días)`}
+          >
+            🕒 {porVencer}
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -202,6 +217,10 @@ export default function Dashboard({ historial = [], productos = [], clientes = [
   const [productosReponer, setProductosReponer] = useState([]);
   const [mostrarOnboarding, setMostrarOnboarding] = useState(false);
 
+  // M17: Comparador de períodos
+  const [comparPeriodos, setComparPeriodos] = useState(null);
+  const [loadingCompar, setLoadingCompar] = useState(false);
+
   const prods = Array.isArray(productos) ? productos : [];
 
   // Disparar asistente de onboarding si no hay productos en el catálogo
@@ -241,6 +260,12 @@ export default function Dashboard({ historial = [], productos = [], clientes = [
   useEffect(() => {
     cargarKpisHoy();
     cargarAlertas();
+    // M17: cargar comparador de períodos al montar
+    setLoadingCompar(true);
+    apiClient.get('/api/reportes/comparar-periodos')
+      .then(r => setComparPeriodos(r.data))
+      .catch(() => setComparPeriodos(null))
+      .finally(() => setLoadingCompar(false));
   }, [cargarKpisHoy, cargarAlertas]);
 
   // ── Gráfico 7 días — desde el historial prop O desde sparklines ──────────
@@ -809,6 +834,97 @@ export default function Dashboard({ historial = [], productos = [], clientes = [
           )}
         </div>
       )}
+
+      {/* ── M17: Comparador Mes Actual vs Anterior ─────────────────────── */}
+      <div
+        className="rounded-2xl p-6 shadow-sm"
+        style={{ background: 'var(--surface-card)', border: '1px solid var(--surface-border)' }}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <BarChart3 size={18} className="text-indigo-500" /> Comparador de Períodos
+            </h2>
+            <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {comparPeriodos ? `${comparPeriodos.periodos.actual.desde} a ${comparPeriodos.periodos.actual.hasta} vs. ${comparPeriodos.periodos.anterior.desde} a ${comparPeriodos.periodos.anterior.hasta}` : 'Mes actual vs mes anterior'}
+            </p>
+          </div>
+          {loadingCompar && <Loader2 size={16} className="animate-spin text-indigo-400" />}
+        </div>
+
+        {loadingCompar ? (
+          <div className="grid grid-cols-3 gap-4">
+            {[1,2,3].map(i => <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-700" />)}
+          </div>
+        ) : comparPeriodos ? (
+          <>
+            {/* KPI deltas */}
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              {[
+                { label: 'Ingresos', actual: comparPeriodos.actual.ingresos, anterior: comparPeriodos.anterior.ingresos, delta: comparPeriodos.deltas.ingresos_pct, fmt: formatCurrency },
+                { label: 'Comprobantes', actual: comparPeriodos.actual.cantidad_ventas, anterior: comparPeriodos.anterior.cantidad_ventas, delta: comparPeriodos.deltas.cantidad_pct, fmt: v => v },
+                { label: 'Ticket Prom.', actual: comparPeriodos.actual.ticket_promedio, anterior: comparPeriodos.anterior.ticket_promedio, delta: comparPeriodos.deltas.ticket_pct, fmt: formatCurrency },
+              ].map(item => {
+                const up = item.delta > 0;
+                const neutral = item.delta === null;
+                return (
+                  <div key={item.label} className="rounded-xl p-4" style={{ background: neutral ? 'var(--surface-bg)' : up ? 'rgba(16,185,129,0.07)' : 'rgba(239,68,68,0.07)', border: `1px solid ${neutral ? 'var(--surface-border)' : up ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)'}` }}>
+                    <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{item.label}</p>
+                    <p className="mt-1 text-lg font-black tabular-nums text-slate-900 dark:text-slate-50">{item.fmt(item.actual)}</p>
+                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Ant: {item.fmt(item.anterior)}</p>
+                    {!neutral && (
+                      <span className={`mt-1 inline-flex items-center gap-0.5 text-xs font-black ${up ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {up ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                        {Math.abs(item.delta)}%
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Rubros comparación — mini bar chart */}
+            {comparPeriodos.por_rubro.length > 0 && (
+              <div>
+                <p className="mb-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Ingresos por Rubro</p>
+                <div className="space-y-2">
+                  {comparPeriodos.por_rubro.slice(0, 6).map(r => {
+                    const maxVal = Math.max(r.actual, r.anterior, 1);
+                    return (
+                      <div key={r.rubro} className="flex items-center gap-3 text-xs">
+                        <p className="w-28 truncate font-medium text-slate-700 dark:text-slate-300 flex-shrink-0">{r.rubro}</p>
+                        <div className="flex-1 space-y-1">
+                          <div className="flex items-center gap-1">
+                            <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${(r.actual / maxVal) * 100}%`, minWidth: r.actual > 0 ? '4px' : 0 }} />
+                            <span className="text-[10px] text-slate-500">{formatCurrency(r.actual)}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <div className="h-2 rounded-full bg-slate-300 dark:bg-slate-600" style={{ width: `${(r.anterior / maxVal) * 100}%`, minWidth: r.anterior > 0 ? '4px' : 0 }} />
+                            <span className="text-[10px] text-slate-400">{formatCurrency(r.anterior)}</span>
+                          </div>
+                        </div>
+                        {r.delta_pct !== null && (
+                          <span className={`text-[10px] font-black w-10 text-right flex-shrink-0 ${r.delta_pct >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                            {r.delta_pct >= 0 ? '+' : ''}{r.delta_pct}%
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex items-center gap-4 text-[10px] font-medium text-slate-400">
+                  <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-full bg-indigo-500" /> Mes actual</span>
+                  <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded-full bg-slate-300 dark:bg-slate-600" /> Mes anterior</span>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="py-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+            Sin datos de comparación disponibles
+          </div>
+        )}
+      </div>
 
       {/* ── Asistente de Primera Configuración (Onboarding) ── */}
       <OnboardingModal

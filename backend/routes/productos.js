@@ -48,7 +48,9 @@ router.get('/', async (req, res, next) => {
       `SELECT p.*, prov.nombre AS proveedor_nombre 
        FROM productos p 
        LEFT JOIN proveedores prov ON p.proveedor_id = prov.id 
-       WHERE p.comercio_id = $1 ${incluirInactivos ? '' : 'AND p.activo = true'}
+       WHERE p.comercio_id = $1
+         ${incluirInactivos ? '' : 'AND p.activo = true'}
+         AND COALESCE(p.activo_pos, true) = true
        ORDER BY p.nombre ASC
        LIMIT $2 OFFSET $3`,
       [comercioId, limit, offset]
@@ -342,14 +344,14 @@ router.put('/:id', async (req, res) => {
       }
     }
 
-    // Determinar si cambió el costo para actualizar fecha
+    // Determinar si cambió el costo o precio_venta para historial y fechas
     const productoActualCosto = await db.query(
-      'SELECT costo FROM productos WHERE id = $1 AND comercio_id = $2',
+      'SELECT costo, precio_venta FROM productos WHERE id = $1 AND comercio_id = $2',
       [id, comercioId]
     );
     const costoAnterior = parseFloat(productoActualCosto.rows[0]?.costo || 0);
     const costoNuevo = parseFloat(costo);
-    const costoChanged = costoAnterior !== costoNuevo;
+    const costoChanged = Math.abs(costoAnterior - costoNuevo) > 0.001;
 
     const result = await db.query(
       `UPDATE productos SET 
@@ -369,6 +371,31 @@ router.put('/:id', async (req, res) => {
     );
 
     if (result.rowCount === 0) return res.status(404).json({ error: 'Producto no encontrado' });
+
+    // M4: registrar historial de precios si precio_venta o costo cambiaron
+    const precioAnteriorFinal = parseFloat(productoActualCosto.rows[0]?.precio_venta ?? precio_venta);
+    const precioNuevoFinal    = parseFloat(precio_venta);
+    const costoNuevoFinal     = parseFloat(costo);
+
+    const histUpdates = [];
+    if (Math.abs(precioAnteriorFinal - precioNuevoFinal) > 0.001) {
+      histUpdates.push(
+        db.query(
+          'INSERT INTO historial_precios (producto_id, comercio_id, campo, precio_anterior, precio_nuevo, usuario_id) VALUES ($1,$2,$3,$4,$5,$6)',
+          [id, comercioId, 'precio_venta', precioAnteriorFinal, precioNuevoFinal, req.usuario?.id]
+        ).catch(() => {}) // tabla puede no existir aun en schema viejo
+      );
+    }
+    if (costoChanged) {
+      histUpdates.push(
+        db.query(
+          'INSERT INTO historial_precios (producto_id, comercio_id, campo, precio_anterior, precio_nuevo, usuario_id) VALUES ($1,$2,$3,$4,$5,$6)',
+          [id, comercioId, 'costo', costoAnterior, costoNuevoFinal, req.usuario?.id]
+        ).catch(() => {})
+      );
+    }
+    if (histUpdates.length > 0) await Promise.all(histUpdates);
+
     res.json({ mensaje: 'Producto actualizado con éxito' });
   } catch (error) {
     console.error('Error al actualizar el producto:', error);
@@ -667,6 +694,105 @@ router.post('/importar', (req, res, next) => {
     console.error('Error al importar XLS:', error);
     res.status(500).json({ error: 'Error al procesar el archivo Excel', detalle: error.message });
   }
+});
+
+// ── M3: Pausas de producto en POS ────────────────────────────────────────────────
+// POST /:id/pausa — Suspender producto del POS (activo_pos = false)
+// Body: { horas: 24 }  (defecto: 24hs, máximo: 168hs = 7 días)
+router.post('/:id/pausa', async (req, res, next) => {
+  const { id }        = req.params;
+  const comercioId    = req.usuario?.comercio_id;
+  const usuarioId     = req.usuario?.id;
+  const horas         = Math.min(Math.max(parseInt(req.body.horas || 24, 10), 1), 168);
+  const pausadoHasta  = new Date(Date.now() + horas * 60 * 60 * 1000);
+
+  try {
+    const result = await db.query(
+      'UPDATE productos SET activo_pos = false, pausado_hasta = $1 WHERE id = $2 AND comercio_id = $3 RETURNING nombre',
+      [pausadoHasta.toISOString(), id, comercioId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Producto no encontrado' });
+    const nombre = result.rows[0].nombre;
+
+    // Registrar en auditoría (no bloquea respuesta)
+    registrarAuditoria({
+      tipo_evento: 'PRODUCTO_PAUSA',
+      descripcion: `Producto "${nombre}" pausado en POS por ${horas}hs hasta ${pausadoHasta.toLocaleString('es-AR')}`,
+      usuario_id:  usuarioId,
+      comercio_id: comercioId,
+    }).catch(() => {});
+
+    res.json({ mensaje: `"${nombre}" pausado en POS hasta ${pausadoHasta.toISOString()}`, pausado_hasta: pausadoHasta.toISOString() });
+  } catch (error) { next(error); }
+});
+
+// DELETE /:id/pausa — Reactivar producto en POS
+router.delete('/:id/pausa', async (req, res, next) => {
+  const { id }     = req.params;
+  const comercioId = req.usuario?.comercio_id;
+  const usuarioId  = req.usuario?.id;
+
+  try {
+    const result = await db.query(
+      'UPDATE productos SET activo_pos = true, pausado_hasta = NULL WHERE id = $1 AND comercio_id = $2 RETURNING nombre',
+      [id, comercioId]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Producto no encontrado' });
+    const nombre = result.rows[0].nombre;
+
+    registrarAuditoria({
+      tipo_evento: 'PRODUCTO_PAUSA',
+      descripcion: `Producto "${nombre}" reactivado en POS`,
+      usuario_id:  usuarioId,
+      comercio_id: comercioId,
+    }).catch(() => {});
+
+    res.json({ mensaje: `"${nombre}" reactivado en POS` });
+  } catch (error) { next(error); }
+});
+
+// GET /pausados — Lista de productos actualmente pausados
+router.get('/pausados', async (req, res, next) => {
+  const comercioId = req.usuario?.comercio_id;
+  try {
+    // Primero: auto-reactivar productos cuya pausa ya expiró
+    await db.query(
+      'UPDATE productos SET activo_pos = true, pausado_hasta = NULL WHERE comercio_id = $1 AND activo_pos = false AND pausado_hasta IS NOT NULL AND pausado_hasta <= NOW()',
+      [comercioId]
+    );
+
+    const result = await db.query(
+      `SELECT id, nombre, rubro, marca, stock, activo_pos, pausado_hasta
+       FROM productos
+       WHERE comercio_id = $1 AND activo_pos = false AND activo = true
+       ORDER BY pausado_hasta ASC NULLS LAST`,
+      [comercioId]
+    );
+    res.json({ total: result.rowCount, pausados: result.rows });
+  } catch (error) { next(error); }
+});
+
+// ── M4: Historial de precios ────────────────────────────────────────────────
+// GET /:id/historial-precios — Últimos N cambios de precio/costo de un producto
+router.get('/:id/historial-precios', async (req, res, next) => {
+  const { id }     = req.params;
+  const comercioId = req.usuario?.comercio_id;
+  const limite     = Math.min(parseInt(req.query.limit || 50, 10), 200);
+
+  try {
+    const result = await db.query(
+      `SELECT h.id, h.campo, h.precio_anterior, h.precio_nuevo,
+              ROUND(((h.precio_nuevo - h.precio_anterior) / NULLIF(h.precio_anterior, 0) * 100)::numeric, 2) AS variacion_pct,
+              h.created_at, u.nombre_usuario AS usuario
+       FROM historial_precios h
+       LEFT JOIN usuarios u ON h.usuario_id = u.id
+       WHERE h.producto_id = $1 AND h.comercio_id = $2
+       ORDER BY h.created_at DESC
+       LIMIT $3`,
+      [id, comercioId, limite]
+    );
+    res.json({ producto_id: parseInt(id, 10), total: result.rowCount, historial: result.rows });
+  } catch (error) { next(error); }
 });
 
 module.exports = router;

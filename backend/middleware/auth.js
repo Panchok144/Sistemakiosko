@@ -85,7 +85,40 @@ const autorizarRoles = (...rolesPermitidos) => (req, res, next) => {
   next();
 };
 
+const checkPermiso = (recurso, accion) => async (req, res, next) => {
+  const usuario = req.usuario;
+  if (!usuario) {
+    return res.status(401).json({ error: 'No autenticado' });
+  }
+  const rol = (usuario.rol || '').toLowerCase();
+  // Superadmin y dueno siempre tienen acceso total
+  if (rol === 'superadmin' || rol === 'dueno') return next();
+
+  try {
+    const resPermiso = await db.query(
+      `SELECT activo FROM permisos_rol
+       WHERE comercio_id = $1 AND rol = $2 AND recurso = $3 AND accion = $4`,
+      [usuario.comercio_id, rol, recurso, accion]
+    );
+
+    if (resPermiso.rowCount > 0) {
+      if (resPermiso.rows[0].activo) return next();
+      return res.status(403).json({ error: `Permiso denegado para ${recurso}:${accion}` });
+    }
+
+    // Administrador tiene acceso por defecto a menos que esté explícitamente en false
+    if (rol === 'administrador') return next();
+
+    // Empleado por defecto
+    return res.status(403).json({ error: `Permiso denegado para ${recurso}:${accion}` });
+  } catch (err) {
+    console.error('Error al verificar permisos:', err);
+    return res.status(500).json({ error: 'Error al verificar permisos' });
+  }
+};
+
 module.exports = {
   authMiddleware,
   autorizarRoles,
+  checkPermiso,
 };

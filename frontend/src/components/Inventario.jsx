@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import apiClient from '../apiClient';
-import { Plus, Filter, Package, ChevronDown, ChevronRight, History, Edit2, Trash2, Box, Upload, Download, TrendingUp, X } from 'lucide-react';
+import { Plus, Filter, Package, ChevronDown, ChevronRight, History, Edit2, Trash2, Box, Upload, Download, TrendingUp, X, Clock, ClipboardList } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import ModalVencimientos from './ModalVencimientos';
+import ModalTomaInventario from './ModalTomaInventario';
 
 export default function Inventario({ 
   productos = [], canManageCatalog, 
@@ -21,8 +23,20 @@ export default function Inventario({
   const [rubroEmoji, setRubroEmoji] = useState('');
   const [rubroEditId, setRubroEditId] = useState(null);
   const [rubroEditNombre, setRubroEditNombre] = useState('');
-  const [rubroEditEmoji, setRubroEditEmoji] = useState('');
+  const [modalVencimientos, setModalVencimientos] = useState(false);
+  const [modalTomaInventario, setModalTomaInventario] = useState(false);
+  const [porVencerCount, setPorVencerCount] = useState(0);
   const location = useLocation();
+
+  useEffect(() => {
+    apiClient.get('/api/vencimientos/resumen')
+      .then(res => {
+        if (res.data?.proximos_30_dias) {
+          setPorVencerCount(res.data.proximos_30_dias);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Read deep-link params from notification bell
   useEffect(() => {
@@ -367,7 +381,28 @@ export default function Inventario({
           </p>
         </div>
         {canManageCatalog && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setModalVencimientos(true)}
+              className="relative flex items-center gap-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 px-3.5 py-2.5 text-xs font-bold transition shadow-sm"
+              title="Control de lotes y vencimientos"
+            >
+              <Clock size={15} /> Vencimientos
+              {porVencerCount > 0 && (
+                <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-600 text-white text-[9px] px-1 font-black animate-pulse">
+                  {porVencerCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalTomaInventario(true)}
+              className="flex items-center gap-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 px-3.5 py-2.5 text-xs font-bold transition shadow-sm"
+              title="Asistente de toma de inventario y recuento físico"
+            >
+              <ClipboardList size={15} /> Conteo Físico
+            </button>
             <button
               type="button"
               onClick={() => setShowFormulario(true)}
@@ -929,6 +964,21 @@ export default function Inventario({
           </div>
         </div>
       )}
+
+      {/* M7: Modal de Control de Vencimientos */}
+      <ModalVencimientos
+        isOpen={modalVencimientos}
+        onClose={() => setModalVencimientos(false)}
+        productos={prods}
+      />
+
+      {/* M8: Asistente de Toma de Inventario */}
+      <ModalTomaInventario
+        isOpen={modalTomaInventario}
+        onClose={() => setModalTomaInventario(false)}
+        rubrosLista={rubrosLista}
+        onFinalizar={cargarProductos}
+      />
     </div>
   );
 }

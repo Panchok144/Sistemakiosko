@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import apiClient from '../apiClient';
 import Swal from 'sweetalert2';
-import { CreditCard, DollarSign, ArrowDownLeft, ArrowUpRight, Search, CheckCircle2 } from 'lucide-react';
+import { CreditCard, DollarSign, ArrowDownLeft, ArrowUpRight, Search, CheckCircle2, FileText, MessageCircle } from 'lucide-react';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { generarEstadoCuentaPDF, generarLinkWhatsAppDeuda } from '../utils/ticketPDF';
 
 export default function CuentaCorriente() {
   const [clientes, setClientes] = useState([]);
@@ -77,6 +78,27 @@ export default function CuentaCorriente() {
     } catch (err) {
       Swal.fire('Error', err.response?.data?.error || 'Error al actualizar el límite', 'error');
     }
+  };
+
+  const handleDescargarEstadoCuenta = async () => {
+    if (!clienteSeleccionado) return;
+    try {
+      const res = await apiClient.get(`/api/cuenta-corriente/${clienteSeleccionado.id}/estado-cuenta`);
+      generarEstadoCuentaPDF(res.data);
+    } catch (err) {
+      Swal.fire('Error', err.response?.data?.error || 'No se pudo generar el estado de cuenta', 'error');
+    }
+  };
+
+  const handleEnviarWhatsApp = () => {
+    if (!clienteSeleccionado) return;
+    const info = getRiesgoInfo(clienteSeleccionado.id);
+    const link = generarLinkWhatsAppDeuda({
+      cliente: clienteSeleccionado,
+      monto: clienteSeleccionado.saldo_deuda || 0,
+      diasMora: info?.dias_mora || 0,
+    });
+    window.open(link, '_blank');
   };
 
   const clientesFiltrados = clientes.filter(c =>
@@ -240,9 +262,32 @@ export default function CuentaCorriente() {
                     <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">{clienteSeleccionado.nombre}</h2>
                     <p className="text-xs text-slate-500 dark:text-slate-400">{clienteSeleccionado.telefono || 'Sin teléfono'} | {clienteSeleccionado.email || 'Sin email'}</p>
                   </div>
-                  <div className="rounded-xl bg-slate-50 dark:bg-slate-900 p-3 text-right border border-slate-100 dark:border-slate-800">
-                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Deuda Actual</span>
-                    <p className="text-2xl font-black text-rose-600 dark:text-rose-400">{formatCurrency(clienteSeleccionado.saldo_deuda || 0)}</p>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="rounded-xl bg-slate-50 dark:bg-slate-900 p-3 text-right border border-slate-100 dark:border-slate-800">
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Deuda Actual</span>
+                      <p className="text-2xl font-black text-rose-600 dark:text-rose-400">{formatCurrency(clienteSeleccionado.saldo_deuda || 0)}</p>
+                    </div>
+                    {/* Botones M9: PDF y WhatsApp */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleDescargarEstadoCuenta}
+                        className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition"
+                        title="Descargar estado de cuenta con aging en PDF"
+                      >
+                        <FileText size={14} className="text-indigo-600 dark:text-indigo-400" /> Estado de Cuenta (PDF)
+                      </button>
+                      {clienteSeleccionado.saldo_deuda > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleEnviarWhatsApp}
+                          className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold shadow-sm transition"
+                          title="Enviar recordatorio de cobro por WhatsApp"
+                        >
+                          <MessageCircle size={14} /> Recordar por WhatsApp
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 

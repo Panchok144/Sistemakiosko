@@ -5,7 +5,7 @@ const { registrarAuditoria } = require('../services/auditoriaService');
 
 // GET /api/facturas-compra
 router.get('/', async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const { estado, proveedor_id } = req.query;
 
   let sql = `
@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
 // GET /api/facturas-compra/:id/items
 router.get('/:id/items', async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   try {
     // Verificar pertenencia al comercio
     const fc = await db.query('SELECT id FROM facturas_compra WHERE id = $1 AND comercio_id = $2', [id, comercioId]);
@@ -53,7 +53,7 @@ router.get('/:id/items', async (req, res) => {
 
 // POST /api/facturas-compra
 router.post('/', async (req, res) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const usuarioId = req.usuario?.id;
   const {
     numero = null, proveedor_id = null,
@@ -129,7 +129,7 @@ router.post('/', async (req, res) => {
 // POST /api/facturas-compra/:id/recibir — Suma stock y actualiza costos
 router.post('/:id/recibir', async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const usuarioId = req.usuario?.id;
 
   try {
@@ -156,6 +156,15 @@ router.post('/:id/recibir', async (req, res) => {
           'UPDATE productos SET stock = stock + $1, costo = $2, fecha_actualizacion_costo = NOW(), updated_at = NOW() WHERE id = $3 AND comercio_id = $4',
           [item.cantidad, item.precio_unitario, item.producto_id, comercioId]
         );
+
+        // M7: Si la factura tiene fecha de vencimiento, registrar lote automáticamente
+        if (fc.fecha_vencimiento) {
+          await client.query(
+            `INSERT INTO producto_lotes (producto_id, comercio_id, numero_lote, cantidad, fecha_vencimiento, usuario_id)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [item.producto_id, comercioId, fc.numero || `FAC-${id}`, item.cantidad, fc.fecha_vencimiento, usuarioId]
+          ).catch(() => {});
+        }
       }
 
       // Marcar factura como recibida
@@ -182,7 +191,7 @@ router.post('/:id/recibir', async (req, res) => {
 // PUT /api/facturas-compra/:id
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   const { estado } = req.body;
   try {
     const result = await db.query(
@@ -199,7 +208,7 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/facturas-compra/:id (solo si no fue recibida)
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
   try {
     const check = await db.query(
       'SELECT recibida FROM facturas_compra WHERE id = $1 AND comercio_id = $2',

@@ -4,7 +4,7 @@ const db = require('../db/conexion');
 
 // ── GET /api/alertas — Resumen de alertas activas del comercio ────────────
 router.get('/', async (req, res, next) => {
-  const comercioId = req.usuario?.comercio_id || 1;
+  const comercioId = req.usuario?.comercio_id;
 
   try {
     // BUG-08 FIX: Ejecutar todas las queries en paralelo con Promise.all()

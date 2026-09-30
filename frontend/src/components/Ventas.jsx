@@ -115,13 +115,79 @@ export default function Ventas({
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'grid'
   const searchInputRef = useRef(null);
 
-  // Caja
-  const [cajaAbierta, setCajaAbierta] = useState(null);
-  const [cajaChecked, setCajaChecked] = useState(false);
+  // N7: tres estados de caja: 'desconocido' | 'abierta' | 'cerrada'
+  // 'desconocido' = red fallida => banner de reintento, bloquear venta
+  // 'cerrada'     = confirmado por servidor => banner bloqueante con CTA
+  // 'abierta'     = confirmado por servidor => POS operativo
+  const [cajaEstado, setCajaEstado] = useState('desconocido');
+  const [cajaInfo, setCajaInfo]     = useState(null);  // datos de la caja abierta
 
   // Configuración
   const [montoMinimoIdentificar, setMontoMinimoIdentificar] = useState(500000);
   const [comercioConfig, setComercioConfig] = useState({});
+
+  // M12: Bloqueo de POS por inactividad
+  const [bloqueadoPorInactividad, setBloqueadoPorInactividad] = useState(false);
+  const [pinDesbloqueo, setPinDesbloqueo] = useState('');
+  const [errorPin, setErrorPin] = useState('');
+  const [desbloqueando, setDesbloqueando] = useState(false);
+  const [timeoutMinutos, setTimeoutMinutos] = useState(15);
+  const timerInactividadRef = useRef(null);
+
+  // Cargar configuración de inactividad
+  useEffect(() => {
+    apiClient.get('/api/configuracion')
+      .then(res => {
+        const val = parseInt(res.data?.params?.timeout_inactividad_minutos, 10);
+        if (!isNaN(val) && val > 0) {
+          setTimeoutMinutos(val);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Timer de inactividad
+  useEffect(() => {
+    if (bloqueadoPorInactividad) return;
+
+    const ms = timeoutMinutos * 60 * 1000;
+    const resetTimer = () => {
+      if (timerInactividadRef.current) clearTimeout(timerInactividadRef.current);
+      timerInactividadRef.current = setTimeout(() => {
+        setBloqueadoPorInactividad(true);
+        apiClient.post('/api/usuarios/bloquear-pos').catch(() => {});
+      }, ms);
+    };
+
+    resetTimer();
+
+    const eventos = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+    const handleActividad = () => resetTimer();
+
+    eventos.forEach(ev => window.addEventListener(ev, handleActividad, { passive: true }));
+
+    return () => {
+      if (timerInactividadRef.current) clearTimeout(timerInactividadRef.current);
+      eventos.forEach(ev => window.removeEventListener(ev, handleActividad));
+    };
+  }, [bloqueadoPorInactividad, timeoutMinutos]);
+
+  const handleDesbloquearPOS = async (e) => {
+    e.preventDefault();
+    if (!pinDesbloqueo) return;
+    setDesbloqueando(true);
+    setErrorPin('');
+    try {
+      await apiClient.post('/api/usuarios/desbloquear-pos', { pin: pinDesbloqueo });
+      setBloqueadoPorInactividad(false);
+      setPinDesbloqueo('');
+      setErrorPin('');
+    } catch (err) {
+      setErrorPin(err.response?.data?.error || 'PIN o contraseña incorrectos');
+    } finally {
+      setDesbloqueando(false);
+    }
+  };
 
   // Historial
   const [showHistorial, setShowHistorial] = useState(false);
@@ -163,11 +229,28 @@ export default function Ventas({
   }, [rubrosLista]);
   const getEmojiForRubro = (nombre) => emojiMap[nombre] || RUBRO_EMOJI_DEFAULT(nombre);
 
+  // N7: verificar caja con tres estados posibles
+  const verificarCaja = () => {
+    setCajaEstado('desconocido'); // mientras recarga, mostrar banner de reintento
+    apiClient.get('/api/ventas/caja-estado')
+      .then(res => {
+        if (res.data.caja) {
+          setCajaInfo(res.data.caja);
+          setCajaEstado('abierta');
+        } else {
+          setCajaInfo(null);
+          setCajaEstado('cerrada');
+        }
+      })
+      .catch(() => {
+        // Fallo de red: NO marcar como cerrada; mantener 'desconocido'
+        setCajaEstado('desconocido');
+      });
+  };
+
   // Verificar caja y cargar config al montar
   useEffect(() => {
-    apiClient.get('/api/ventas/caja-estado')
-      .then(res => { setCajaAbierta(res.data.caja); setCajaChecked(true); })
-      .catch(() => setCajaChecked(true));
+    verificarCaja();
 
     apiClient.get('/api/configuracion')
       .then(res => {
@@ -315,8 +398,31 @@ export default function Ventas({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [carrito, finalizarVenta, productosFiltrados, agregarAlCarrito]);
 
-  // ── Si la caja no está abierta, mostrar banner bloqueante ──
-  if (cajaChecked && !cajaAbierta) {
+  // ── N7: Banner de estado desconocido (fallo de red) ─────────────────────
+  if (cajaEstado === 'desconocido') {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-12 text-center shadow-sm space-y-4">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 animate-pulse">
+          <Lock size={32} />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Verificando caja…</h2>
+          <p className="mt-2 text-slate-600 dark:text-slate-300 max-w-sm">
+            No se pudo confirmar el estado de la caja (sin red o servidor no disponible). Las ventas están bloqueadas hasta confirmar.
+          </p>
+        </div>
+        <button
+          onClick={verificarCaja}
+          className="rounded-xl bg-slate-700 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-600 transition-all shadow-md"
+        >
+          Reintentar verificación
+        </button>
+      </div>
+    );
+  }
+
+  // ── N7: Banner bloqueante cuando caja está confirmada como CERRADA ────────
+  if (cajaEstado === 'cerrada') {
     return (
       <div className="flex flex-col items-center justify-center rounded-2xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/20 p-12 text-center shadow-sm space-y-4">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900 text-amber-600 dark:text-amber-300">
@@ -328,9 +434,17 @@ export default function Ventas({
             No podés realizar ventas sin una caja abierta. Ir a <strong>Caja</strong> y abrí el turno primero.
           </p>
         </div>
-        <a href="/caja" className="rounded-xl bg-amber-500 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all shadow-md">
-          Ir a Caja →
-        </a>
+        <div className="flex gap-3">
+          <a href="/caja" className="rounded-xl bg-amber-500 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-600 transition-all shadow-md">
+            Ir a Caja →
+          </a>
+          <button
+            onClick={verificarCaja}
+            className="rounded-xl border border-amber-300 dark:border-amber-700 px-6 py-3 text-sm font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all"
+          >
+            Actualizar estado
+          </button>
+        </div>
       </div>
     );
   }
@@ -748,6 +862,62 @@ export default function Ventas({
           )}
         </aside>
       </div>
+
+      {/* M12: Overlay de Bloqueo por Inactividad */}
+      {bloqueadoPorInactividad && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4">
+          <div className="w-full max-w-md rounded-[2.5rem] bg-white dark:bg-slate-900 p-8 shadow-2xl border border-slate-200 dark:border-slate-800 text-center space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-lg shadow-amber-500/10">
+              <Lock size={32} />
+            </div>
+
+            <div>
+              <h2 className="text-xl font-black text-slate-900 dark:text-slate-100">
+                Punto de Venta Bloqueado
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Se activó la protección por inactividad tras {timeoutMinutos} minutos sin uso. Tu carrito y turno de caja están a salvo.
+              </p>
+            </div>
+
+            {carrito.length > 0 && (
+              <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/60 p-3 text-xs border border-slate-200/60 dark:border-slate-700/60 text-slate-600 dark:text-slate-300">
+                🛒 <b>{carrito.length}</b> artículos en el carrito actual (Total: <b>{formatCurrency(totalCarrito)}</b>)
+              </div>
+            )}
+
+            <form onSubmit={handleDesbloquearPOS} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wider">
+                  PIN o Contraseña del Cajero
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  required
+                  placeholder="••••"
+                  value={pinDesbloqueo}
+                  onChange={(e) => setPinDesbloqueo(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 py-3 text-center text-xl font-bold tracking-widest text-slate-900 dark:text-slate-100 outline-none focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+                {errorPin && (
+                  <p className="mt-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
+                    {errorPin}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={desbloqueando}
+                className="w-full rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] py-3 text-sm font-bold text-white shadow-lg shadow-indigo-600/25 transition disabled:opacity-50"
+              >
+                {desbloqueando ? 'Verificando...' : 'Desbloquear y Continuar'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

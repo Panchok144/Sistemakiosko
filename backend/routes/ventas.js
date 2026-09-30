@@ -229,7 +229,7 @@ const registrarVentaHandler = async (req, res) => {
       // 1. Obtener datos de productos de BD (precio_venta, IVA, stock) bloqueando filas para evitar condiciones de carrera
       const productIds = productos.map(p => p.id);
       const dbProductsResult = await client.query(
-        'SELECT id, nombre, precio_venta, precio_lista2, iva_porcentaje, stock FROM productos WHERE id = ANY($1) AND comercio_id = $2 FOR UPDATE',
+        'SELECT id, nombre, precio_venta, precio_lista2, iva_porcentaje, stock, costo FROM productos WHERE id = ANY($1) AND comercio_id = $2 FOR UPDATE',
         [productIds, comercioId]
       );
       
@@ -237,6 +237,10 @@ const registrarVentaHandler = async (req, res) => {
         acc[row.id] = row;
         return acc;
       }, {});
+
+      // M1: también obtener costo actual de cada producto para congelarlo en detalle_ventas
+      // (el SELECT ya incluye los campos necesarios — costo se suma aquí)
+      const costoMap = {}; // id_producto -> costo en número
 
       // Validar existencia de productos y stock suficiente antes de calcular o insertar comprobantes
       for (const p of productos) {
@@ -251,6 +255,8 @@ const registrarVentaHandler = async (req, res) => {
           stockErr.statusCode = 409;
           throw stockErr;
         }
+        // M1: registrar costo actual del producto (se congelará en detalle_ventas)
+        costoMap[p.id] = parseFloat(dbP.costo || 0);
       }
 
       // 1b. Si se especifica lista de precios, validarla
@@ -499,10 +505,20 @@ const registrarVentaHandler = async (req, res) => {
 
       // 1f. Insertar detalle de venta y descontar stock
       for (const producto of productos) {
-        await client.query(
-          'INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, comercio_id) VALUES ($1, $2, $3, $4, $5)',
-          [idVenta, producto.id, producto.cantidad, producto.precio_unitario, comercioId]
-        );
+        // M1: usar costo congelado al momento de la venta
+        const costoUnitario = costoMap[producto.id] ?? null;
+        try {
+          await client.query(
+            'INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, comercio_id, costo_unitario) VALUES ($1, $2, $3, $4, $5, $6)',
+            [idVenta, producto.id, producto.cantidad, producto.precio_unitario, comercioId, costoUnitario]
+          );
+        } catch (_colErr) {
+          // Fallback: si costo_unitario no existe (schema viejo sin 019/020)
+          await client.query(
+            'INSERT INTO detalle_ventas (id_venta, id_producto, cantidad, precio_unitario, comercio_id) VALUES ($1, $2, $3, $4, $5)',
+            [idVenta, producto.id, producto.cantidad, producto.precio_unitario, comercioId]
+          );
+        }
 
         const stockUpdate = await client.query(
           'UPDATE productos SET stock = stock - $1 WHERE id = $2 AND comercio_id = $3 AND stock >= $1 RETURNING id',

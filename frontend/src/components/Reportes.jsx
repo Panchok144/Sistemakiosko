@@ -23,6 +23,7 @@ export default function Reportes() {
   const [reporteRubros, setReporteRubros] = useState([]);
   const [reporteAbc, setReporteAbc] = useState(null);
   const [filtroClaseAbc, setFiltroClaseAbc] = useState('todas');
+  const [reporteFranja, setReporteFranja] = useState(null);
 
   useEffect(() => {
     cargarReporte();
@@ -49,6 +50,9 @@ export default function Reportes() {
       } else if (tab === 'abc') {
         const res = await apiClient.get('/api/reportes/analisis-abc?dias=90');
         setReporteAbc(res.data);
+      } else if (tab === 'franja') {
+        const res = await apiClient.get(`/api/reportes/franja-horaria?desde=${desde}&hasta=${hasta}`);
+        setReporteFranja(res.data);
       }
     } catch (err) {
       console.error(err);
@@ -99,6 +103,7 @@ export default function Reportes() {
           { id: 'rotacion', label: '🔄 Rotación (30 días)' },
           { id: 'rubros', label: '🏷️ Por Categoría' },
           { id: 'abc', label: '🎯 Clasificación ABC (80/20)' },
+          { id: 'franja', label: '⏰ Franja Horaria (Heatmap)' },
         ].map((t) => (
           <button
             key={t.id}
@@ -496,6 +501,150 @@ export default function Reportes() {
               </div>
             </div>
           )}
+
+          {/* TAB 7: FRANJA HORARIA (M10) */}
+          {tab === 'franja' && reporteFranja && (() => {
+            const diasNombres = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+            const datos = reporteFranja.datos || [];
+
+            // Totales por hora (0..23)
+            const porHora = Array.from({ length: 24 }, (_, h) => ({
+              hora: `${h.toString().padStart(2, '0')}:00`,
+              horaNum: h,
+              ventas: 0,
+              comprobantes: 0,
+            }));
+
+            // Matriz día x hora
+            const matriz = {};
+            let maxTotalCelda = 0;
+            let totalGeneral = 0;
+            let totalComprobantes = 0;
+
+            for (const d of datos) {
+              const h = d.hora;
+              const dia = d.dia_semana;
+              const tv = d.total_ventas || 0;
+              const cv = d.cantidad_ventas || 0;
+
+              if (porHora[h]) {
+                porHora[h].ventas += tv;
+                porHora[h].comprobantes += cv;
+              }
+
+              const key = `${dia}-${h}`;
+              matriz[key] = { ventas: tv, comprobantes: cv };
+              if (tv > maxTotalCelda) maxTotalCelda = tv;
+              totalGeneral += tv;
+              totalComprobantes += cv;
+            }
+
+            // Horas pico y mejor día
+            const horaPico = [...porHora].sort((a, b) => b.ventas - a.ventas)[0] || { hora: '--', ventas: 0 };
+            const horasConVentas = porHora.filter(h => h.horaNum >= 7 && h.horaNum <= 23);
+
+            return (
+              <div className="space-y-6">
+                {/* Summary Cards */}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 shadow-sm">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Analizado</p>
+                    <p className="mt-1 text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                      ${totalGeneral.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">{totalComprobantes} transacciones en el período</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 shadow-sm">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Hora Pico de Facturación</p>
+                    <p className="mt-1 text-2xl font-black text-amber-600 dark:text-amber-400">{horaPico.hora}</p>
+                    <p className="text-xs text-slate-500 mt-1">${horaPico.ventas.toLocaleString('es-AR', { minimumFractionDigits: 2 })} acumulados</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-5 shadow-sm">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Planificación de Turnos</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      Horarios de mayor afluencia para reforzar cajeros y reposición.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Gráfico Recharts de Ventas por Hora */}
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-6 shadow-sm">
+                  <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-4">Ventas por Hora del Día (7:00 a 23:00)</h3>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={horasConVentas}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                        <XAxis dataKey="hora" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`} />
+                        <Tooltip
+                          formatter={(value) => [`$${Number(value).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`, 'Facturación']}
+                          labelFormatter={(l) => `Hora: ${l}`}
+                        />
+                        <Bar dataKey="ventas" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Heatmap Día de Semana x Hora */}
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800 p-6 shadow-sm">
+                  <h3 className="font-bold text-slate-900 dark:text-slate-100 mb-2">Mapa de Calor: Ventas por Día y Hora</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                    La intensidad del color azul indica mayor volumen de facturación en esa franja horaria.
+                  </p>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-center border-collapse">
+                      <thead>
+                        <tr>
+                          <th className="p-2 text-left font-bold text-slate-600 dark:text-slate-400 w-16">Día</th>
+                          {Array.from({ length: 16 }, (_, i) => i + 8).map((h) => (
+                            <th key={h} className="p-2 font-bold text-slate-500 dark:text-slate-400 text-[11px]">
+                              {h}:00
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[1, 2, 3, 4, 5, 6, 0].map((diaNum) => (
+                          <tr key={diaNum} className="border-t border-slate-100 dark:border-slate-700/60">
+                            <td className="p-2 text-left font-bold text-slate-800 dark:text-slate-200">
+                              {diasNombres[diaNum]}
+                            </td>
+                            {Array.from({ length: 16 }, (_, i) => i + 8).map((h) => {
+                              const celda = matriz[`${diaNum}-${h}`] || { ventas: 0, comprobantes: 0 };
+                              const pct = maxTotalCelda > 0 ? celda.ventas / maxTotalCelda : 0;
+                              const bg = pct > 0
+                                ? `rgba(79, 70, 229, ${Math.max(0.12, Math.min(0.92, pct * 0.95))})`
+                                : 'transparent';
+                              const textoBlanco = pct > 0.45;
+
+                              return (
+                                <td
+                                  key={h}
+                                  className="p-1.5 transition hover:ring-2 hover:ring-indigo-500 rounded"
+                                  style={{ backgroundColor: bg }}
+                                  title={`${diasNombres[diaNum]} ${h}:00 hs — $${celda.ventas.toLocaleString('es-AR')} (${celda.comprobantes} ventas)`}
+                                >
+                                  {celda.ventas > 0 ? (
+                                    <span className={`block font-bold text-[10px] ${textoBlanco ? 'text-white' : 'text-slate-800 dark:text-slate-200'}`}>
+                                      ${celda.ventas >= 1000 ? `${Math.round(celda.ventas / 1000)}k` : Math.round(celda.ventas)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-300 dark:text-slate-700 text-[10px]">·</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </>
       )}
     </div>

@@ -30,6 +30,11 @@ const rutasLicencias = require('./routes/licencias');
 const rutasBackup = require('./routes/backup');
 const rutasAlertas = require('./routes/alertas');
 const rutasDemo = require('./routes/demo');
+const rutasVencimientos = require('./routes/vencimientos');
+const rutasConteos = require('./routes/conteos');
+const rutasPromociones = require('./routes/promociones');
+const rutasFidelidad = require('./routes/fidelidad');
+const rutasCatalogo = require('./routes/catalogo');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -110,6 +115,12 @@ app.use('/api/notas', authMiddleware, rutasNotas);
 app.use('/api/licencias', authMiddleware, rutasLicencias);
 app.use('/api/backup', authMiddleware, rutasBackup);
 app.use('/api/alertas', authMiddleware, rutasAlertas);
+app.use('/api/vencimientos', authMiddleware, rutasVencimientos);
+app.use('/api/conteos', authMiddleware, rutasConteos);
+app.use('/api/promociones', authMiddleware, rutasPromociones);
+app.use('/api/fidelidad', authMiddleware, rutasFidelidad);
+// M15: Catálogo público — SIN autenticación, acceso libre
+app.use('/api/catalogo', rutasCatalogo);
 
 const demoAuthGuard = (req, res, next) => {
   if (req.path === '/login-demo' || req.path === '/acceso-demo') {

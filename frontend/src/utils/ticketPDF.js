@@ -225,3 +225,125 @@ export function generarLinkWhatsApp({ venta, items = [], comercio = {}, telefono
   const tel = telefono.replace(/\D/g, '');
   return `https://wa.me/${tel}?text=${encoded}`;
 }
+
+/**
+ * M9: Genera y descarga el Estado de Cuenta de un cliente en formato PDF (A4)
+ */
+export function generarEstadoCuentaPDF({ cliente, comercio = {}, aging = {}, movimientos = [] }) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = 210;
+  const MARGEN = 14;
+  let y = 18;
+
+  // Header Comercio
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(comercio.nombre || 'KIOSKOPRO', MARGEN, y);
+  y += 6;
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  if (comercio.cuit) { doc.text(`CUIT: ${comercio.cuit}`, MARGEN, y); y += 4; }
+  if (comercio.domicilio) { doc.text(comercio.domicilio, MARGEN, y); y += 4; }
+  if (comercio.telefono) { doc.text(`Tel: ${comercio.telefono}`, MARGEN, y); y += 4; }
+
+  // Title Box
+  doc.setFillColor(243, 244, 246);
+  doc.rect(MARGEN, y + 2, W - MARGEN * 2, 9, 'F');
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('ESTADO DE CUENTA CORRIENTE', W / 2, y + 8, { align: 'center' });
+  y += 18;
+
+  // Datos Cliente & Fecha
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Cliente: ${cliente.nombre}`, MARGEN, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Fecha: ${new Date().toLocaleDateString('es-AR')}`, W - MARGEN, y, { align: 'right' });
+  y += 5;
+
+  if (cliente.documento) {
+    doc.text(`DNI / CUIT: ${cliente.documento}`, MARGEN, y);
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.text(`DEUDA TOTAL: ${formatCurrency(cliente.saldo_deuda || 0)}`, W - MARGEN, y, { align: 'right' });
+  y += 7;
+
+  // Cuadro Aging (Antigüedad de deuda)
+  doc.setFillColor(249, 250, 251);
+  doc.rect(MARGEN, y, W - MARGEN * 2, 14, 'F');
+  doc.setDrawColor(209, 213, 219);
+  doc.rect(MARGEN, y, W - MARGEN * 2, 14, 'S');
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  const colW = (W - MARGEN * 2) / 4;
+  doc.text('0 a 30 días', MARGEN + colW * 0.5, y + 4.5, { align: 'center' });
+  doc.text('31 a 60 días', MARGEN + colW * 1.5, y + 4.5, { align: 'center' });
+  doc.text('61 a 90 días', MARGEN + colW * 2.5, y + 4.5, { align: 'center' });
+  doc.text('+90 días (Mora)', MARGEN + colW * 3.5, y + 4.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.text(formatCurrency(aging.dias_0_30 || 0), MARGEN + colW * 0.5, y + 10.5, { align: 'center' });
+  doc.text(formatCurrency(aging.dias_31_60 || 0), MARGEN + colW * 1.5, y + 10.5, { align: 'center' });
+  doc.text(formatCurrency(aging.dias_61_90 || 0), MARGEN + colW * 2.5, y + 10.5, { align: 'center' });
+  doc.text(formatCurrency(aging.dias_mas_90 || 0), MARGEN + colW * 3.5, y + 10.5, { align: 'center' });
+  y += 18;
+
+  // Tabla de Movimientos
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setFillColor(243, 244, 246);
+  doc.rect(MARGEN, y, W - MARGEN * 2, 7, 'F');
+  doc.text('Fecha', MARGEN + 2, y + 5);
+  doc.text('Tipo', MARGEN + 30, y + 5);
+  doc.text('Concepto', MARGEN + 60, y + 5);
+  doc.text('Monto', MARGEN + 140, y + 5, { align: 'right' });
+  doc.text('Saldo Acum.', W - MARGEN - 2, y + 5, { align: 'right' });
+  y += 9;
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  for (const m of (movimientos || []).slice(0, 45)) {
+    if (y > 280) {
+      doc.addPage();
+      y = 15;
+    }
+    const esDebito = m.tipo === 'debito' || m.tipo === 'venta' || m.tipo === 'cargo' || (m.tipo === 'ajuste' && m.monto > 0);
+    doc.text(formatDate(m.fecha), MARGEN + 2, y);
+    doc.text(m.tipo || '—', MARGEN + 30, y);
+    const desc = (m.descripcion || '—').slice(0, 36);
+    doc.text(desc, MARGEN + 60, y);
+    doc.text(`${esDebito ? '+' : '-'}${formatCurrency(m.monto)}`, MARGEN + 140, y, { align: 'right' });
+    doc.text(formatCurrency(m.saldo_acumulado || 0), W - MARGEN - 2, y, { align: 'right' });
+    y += 5.5;
+  }
+
+  // Footer
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'italic');
+  doc.text('Documento no válido como factura fiscal. Emitido automáticamente por KioskoPro.', W / 2, 290, { align: 'center' });
+
+  doc.save(`Estado_Cuenta_${cliente.nombre.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+/**
+ * M9: Genera link de WhatsApp con el recordatorio de deuda y días de mora
+ */
+export function generarLinkWhatsAppDeuda({ cliente, comercio = {}, monto = 0, diasMora = 0 }) {
+  const tel = (cliente?.telefono || '').replace(/\D/g, '');
+  const nombreComercio = comercio?.nombre || 'KioskoPro';
+  let mensaje = `Hola *${cliente?.nombre || 'Estimado cliente'}*, te escribimos de *${nombreComercio}*.\n\n`;
+  mensaje += `Te informamos que tu estado de cuenta corriente presenta un saldo pendiente de *${formatCurrency(monto)}*`;
+  if (diasMora > 0) {
+    mensaje += ` con *${diasMora} días* de antigüedad`;
+  }
+  mensaje += `.\n\nAgradecemos regularizar el saldo a la brevedad. ¡Muchas gracias!`;
+  if (comercio?.telefono) {
+    mensaje += `\n\nPor cualquier consulta comunicate al ${comercio.telefono}.`;
+  }
+
+  const encoded = encodeURIComponent(mensaje);
+  return `https://wa.me/${tel}?text=${encoded}`;
+}

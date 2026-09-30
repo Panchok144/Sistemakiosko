@@ -21,6 +21,107 @@ router.get('/', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /sugerencia — M2: Sugerencia automática de compra basada en rotación
+// Debe ir ANTES de /:id para evitar que Express capture "sugerencia" como id
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/sugerencia', async (req, res, next) => {
+  const comercioId = req.usuario?.comercio_id;
+  if (!comercioId) return res.status(401).json({ error: 'No autorizado' });
+
+  const diasUmbral = Math.min(parseInt(req.query.dias_umbral || 7, 10), 60);
+  const diasAnalisis = Math.min(parseInt(req.query.dias_analisis || 30, 10), 365);
+
+  try {
+    const result = await db.query(
+      `WITH rotacion AS (
+        SELECT
+          p.id,
+          p.nombre,
+          p.rubro,
+          p.stock,
+          p.costo,
+          p.precio_venta,
+          p.punto_reposicion,
+          p.stock_minimo,
+          p.proveedor_id,
+          prov.nombre AS proveedor_nombre,
+          COALESCE(SUM(dv.cantidad), 0) AS vendidos_periodo,
+          CASE
+            WHEN COALESCE(SUM(dv.cantidad), 0) > 0 AND p.stock > 0
+            THEN ROUND((p.stock::NUMERIC / NULLIF(SUM(dv.cantidad)::NUMERIC / $3::NUMERIC, 0)), 1)
+            WHEN p.stock = 0 THEN 0
+            ELSE NULL
+          END AS dias_stock_restante
+        FROM productos p
+        LEFT JOIN proveedores prov ON p.proveedor_id = prov.id
+        LEFT JOIN detalle_ventas dv ON p.id = dv.id_producto
+        LEFT JOIN ventas v ON dv.id_venta = v.id
+          AND v.fecha >= NOW() - ($3::TEXT || ' days')::INTERVAL
+          AND v.estado != 'error_afip'
+          AND v.comercio_id = $1
+        WHERE p.comercio_id = $1 AND p.activo = true
+        GROUP BY p.id, prov.nombre
+      )
+      SELECT *
+      FROM rotacion
+      WHERE
+        (dias_stock_restante IS NOT NULL AND dias_stock_restante <= $2)
+        OR (dias_stock_restante IS NULL AND stock = 0)
+        OR (punto_reposicion > 0 AND stock <= punto_reposicion)
+        OR (stock_minimo > 0 AND stock <= stock_minimo)
+      ORDER BY COALESCE(dias_stock_restante, 0) ASC, vendidos_periodo DESC`,
+      [comercioId, diasUmbral, diasAnalisis]
+    );
+
+    // Agrupar por proveedor
+    const porProveedor = {};
+    for (const p of result.rows) {
+      const provKey  = p.proveedor_id || 0;
+      const provNom  = p.proveedor_nombre || 'Sin proveedor asignado';
+      if (!porProveedor[provKey]) {
+        porProveedor[provKey] = { proveedor_id: p.proveedor_id, proveedor_nombre: provNom, items: [] };
+      }
+
+      // Cantidad sugerida: lo necesario para reponer al doble del punto de reposición
+      // Si no hay punto de reposición, sugerir la venta promedio diaria × 14 días
+      const ventaDiaria = diasAnalisis > 0 ? (Number(p.vendidos_periodo) / diasAnalisis) : 0;
+      const cantidadSugerida = p.punto_reposicion > 0
+        ? Math.max(p.punto_reposicion * 2 - p.stock, 1)
+        : Math.max(Math.ceil(ventaDiaria * 14) - p.stock, 1);
+
+      porProveedor[provKey].items.push({
+        producto_id:       p.id,
+        nombre:            p.nombre,
+        rubro:             p.rubro,
+        stock_actual:      p.stock,
+        dias_stock:        p.dias_stock_restante,
+        punto_reposicion:  p.punto_reposicion,
+        stock_minimo:      p.stock_minimo,
+        venta_diaria:      Math.round(ventaDiaria * 10) / 10,
+        cantidad_sugerida: cantidadSugerida,
+        costo_unitario:    parseFloat(p.costo || 0),
+        costo_total:       Math.round(cantidadSugerida * parseFloat(p.costo || 0) * 100) / 100,
+      });
+    }
+
+    const sugerencias = Object.values(porProveedor).map(prov => ({
+      ...prov,
+      total_items:        prov.items.length,
+      costo_total_prov:   Math.round(prov.items.reduce((s, i) => s + i.costo_total, 0) * 100) / 100,
+    }));
+
+    res.json({
+      fecha_analisis:   new Date().toISOString(),
+      dias_umbral:      diasUmbral,
+      dias_analizados:  diasAnalisis,
+      total_productos:  result.rowCount,
+      total_proveedores: sugerencias.length,
+      sugerencias,
+    });
+  } catch (error) { next(error); }
+});
+
 // GET /:id — Detalle de la orden de compra con ítems
 router.get('/:id', async (req, res, next) => {
   const { id } = req.params;
@@ -168,3 +269,5 @@ router.delete('/:id', async (req, res, next) => {
 });
 
 module.exports = router;
+
+

@@ -30,6 +30,7 @@ const Configuracion = lazy(() => import('./components/Configuracion.jsx'))
 const Gastos = lazy(() => import('./components/Gastos.jsx'))
 const FacturasCompra = lazy(() => import('./components/FacturasCompra.jsx'))
 const Licencias = lazy(() => import('./components/Licencias.jsx'))
+const CatalogoPublico = lazy(() => import('./components/CatalogoPublico.jsx'))
 
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 
@@ -889,6 +890,8 @@ function RouteLoadingFallback() {
             <Route path="*" element={<Navigate to="/" replace />} />
 
           </Route>
+          {/* M15: Catálogo público — fuera del Layout, sin autenticación */}
+          <Route path="/c/:slug" element={<CatalogoPublico />} />
         </Routes>
       </Suspense>
 

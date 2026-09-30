@@ -271,8 +271,13 @@ function CajaIndicator() {
 // ── Componente de estado de Conexión y Cola Offline ────────────────────────
 function SyncIndicator() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [queueCount, setQueueCount] = useState(() => obtenerVentasOffline().length);
+  const [queueCount, setQueueCount] = useState(0); // M6: IndexedDB es async, init en 0
   const [syncing, setSyncing] = useState(false);
+
+  // M6: cargar count inicial desde IndexedDB de forma asíncrona
+  useEffect(() => {
+    obtenerVentasOffline().then(lista => setQueueCount(lista.length)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -300,7 +305,9 @@ function SyncIndicator() {
     setSyncing(true);
     try {
       await sincronizarVentasPendientes(apiClient);
-      setQueueCount(obtenerVentasOffline().length);
+      // M6: obtenerVentasOffline es async con IndexedDB
+      const pendientes = await obtenerVentasOffline();
+      setQueueCount(pendientes.length);
     } catch (_) {
     } finally {
       setSyncing(false);

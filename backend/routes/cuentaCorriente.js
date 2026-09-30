@@ -103,6 +103,161 @@ router.get('/resumen-mora', async (req, res, next) => {
   }
 });
 
+// ── GET /recordatorios-mora — Listado de deudas vencidas para alertas/recordatorios (M9) ──
+router.get('/recordatorios-mora', async (req, res, next) => {
+  const comercioId = req.usuario?.comercio_id;
+  try {
+    const clientesRes = await db.query(
+      `SELECT c.id, c.nombre, c.telefono, c.saldo_deuda,
+              MIN(CASE WHEN m.tipo = 'debito' THEN m.fecha ELSE NULL END) AS primer_debito_fecha,
+              MAX(CASE WHEN m.tipo = 'credito' THEN m.fecha ELSE NULL END) AS ultimo_pago_fecha
+       FROM clientes c
+       LEFT JOIN movimientos_cuenta_corriente m ON c.id = m.cliente_id AND m.comercio_id = $1
+       WHERE c.comercio_id = $1 AND c.saldo_deuda > 0
+       GROUP BY c.id
+       ORDER BY c.saldo_deuda DESC`,
+      [comercioId]
+    );
+
+    const hoy = new Date();
+    const morosos = [];
+
+    for (const c of clientesRes.rows) {
+      const fechaBase = c.ultimo_pago_fecha ? new Date(c.ultimo_pago_fecha) : (c.primer_debito_fecha ? new Date(c.primer_debito_fecha) : null);
+      let diasMora = 0;
+      if (fechaBase) {
+        diasMora = Math.max(0, Math.floor((hoy - fechaBase) / (1000 * 60 * 60 * 24)));
+      }
+      if (diasMora >= 30) {
+        morosos.push({
+          id: c.id,
+          nombre: c.nombre,
+          telefono: c.telefono,
+          saldo_deuda: parseFloat(c.saldo_deuda || 0),
+          dias_mora: diasMora,
+          mensaje_whatsapp: `Hola ${c.nombre}, te recordamos que tenés un saldo pendiente de $${parseFloat(c.saldo_deuda).toLocaleString('es-AR', { minimumFractionDigits: 2 })} con ${diasMora} días de antigüedad en tu cuenta corriente. ¡Muchas gracias!`,
+        });
+      }
+    }
+
+    res.json({
+      total_vencidas: morosos.length,
+      clientes_mora: morosos,
+    });
+  } catch (error) { next(error); }
+});
+
+// ── GET /:cliente_id/estado-cuenta — Estado de cuenta con saldo acumulado y aging 30/60/90 (M9) ──
+router.get('/:cliente_id/estado-cuenta', async (req, res, next) => {
+  const { cliente_id } = req.params;
+  const comercioId = req.usuario?.comercio_id;
+
+  try {
+    const [clienteResult, comercioResult, movimientosResult] = await Promise.all([
+      db.query(
+        'SELECT id, nombre, documento, telefono, email, direccion, credito_limite, saldo_deuda FROM clientes WHERE id = $1 AND comercio_id = $2',
+        [cliente_id, comercioId]
+      ),
+      db.query(
+        'SELECT nombre, razon_social, cuit, domicilio, telefono, email, leyenda_ticket FROM comercios WHERE id = $1',
+        [comercioId]
+      ),
+      db.query(
+        `SELECT m.*, u.nombre_usuario AS operador
+         FROM movimientos_cuenta_corriente m
+         LEFT JOIN usuarios u ON m.usuario_id = u.id
+         WHERE m.cliente_id = $1 AND m.comercio_id = $2
+         ORDER BY m.fecha ASC`,
+        [cliente_id, comercioId]
+      ),
+    ]);
+
+    if (clienteResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+
+    const cliente = clienteResult.rows[0];
+    const comercio = comercioResult.rows[0] || {};
+    const movimientos = movimientosResult.rows;
+
+    let saldoCents = 0;
+    const movimientosConSaldo = [];
+
+    for (const m of movimientos) {
+      const montoFloat = parseFloat(m.monto || 0);
+      const montoC = Math.round(montoFloat * 100);
+      const esDebito = m.tipo === 'debito' || m.tipo === 'venta' || m.tipo === 'cargo' || (m.tipo === 'ajuste' && montoFloat > 0);
+
+      if (esDebito) {
+        saldoCents += montoC;
+      } else {
+        saldoCents -= montoC;
+      }
+
+      movimientosConSaldo.push({
+        id: m.id,
+        fecha: m.fecha,
+        tipo: m.tipo,
+        descripcion: m.descripcion,
+        monto: montoFloat,
+        saldo_acumulado: Math.round(saldoCents) / 100,
+        operador: m.operador,
+      });
+    }
+
+    // Calcular aging de la deuda pendiente
+    const hoy = new Date();
+    let aging_0_30 = 0;
+    let aging_31_60 = 0;
+    let aging_61_90 = 0;
+    let aging_90_plus = 0;
+    let maxDiasMora = 0;
+
+    let saldoRestanteDeudaCents = Math.round(parseFloat(cliente.saldo_deuda || 0) * 100);
+    const debits = movimientos.filter(m => {
+      const mf = parseFloat(m.monto || 0);
+      return m.tipo === 'debito' || m.tipo === 'venta' || (m.tipo === 'ajuste' && mf > 0);
+    });
+
+    for (let i = debits.length - 1; i >= 0 && saldoRestanteDeudaCents > 0; i--) {
+      const d = debits[i];
+      const montoD = Math.min(saldoRestanteDeudaCents, Math.round(parseFloat(d.monto || 0) * 100));
+      saldoRestanteDeudaCents -= montoD;
+      const dias = Math.max(0, Math.floor((hoy - new Date(d.fecha)) / (1000 * 60 * 60 * 24)));
+      if (dias > maxDiasMora) maxDiasMora = dias;
+
+      if (dias <= 30) {
+        aging_0_30 += montoD;
+      } else if (dias <= 60) {
+        aging_31_60 += montoD;
+      } else if (dias <= 90) {
+        aging_61_90 += montoD;
+      } else {
+        aging_90_plus += montoD;
+      }
+    }
+    if (saldoRestanteDeudaCents > 0) {
+      aging_90_plus += saldoRestanteDeudaCents;
+    }
+
+    const aging = {
+      dias_0_30: aging_0_30 / 100,
+      dias_31_60: aging_31_60 / 100,
+      dias_61_90: aging_61_90 / 100,
+      dias_mas_90: aging_90_plus / 100,
+      total_deuda: parseFloat(cliente.saldo_deuda || 0),
+      dias_mora_max: maxDiasMora,
+    };
+
+    res.json({
+      cliente,
+      comercio,
+      aging,
+      movimientos: movimientosConSaldo.reverse(), // Más recientes primero para la tabla
+    });
+  } catch (error) { next(error); }
+});
+
 // GET /:cliente_id — Estado de cuenta de un cliente con movimientos
 router.get('/:cliente_id', async (req, res, next) => {
   const { cliente_id } = req.params;
